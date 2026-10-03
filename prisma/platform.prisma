@@ -1,0 +1,40 @@
+// prisma/platform.prisma - Platform Control Database Schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/platform-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("PLATFORM_DATABASE_URL")
+}
+
+model PlatformShop {
+  id                String         @id @default(uuid())
+  slug              String         @unique
+  name              String
+  email             String         @unique
+  status            String         @default("ACTIVE") // ACTIVE, SUSPENDED
+  dbConnectionUrl   String         @map("db_connection_url") // e.g. postgresql://user:pwd@cloudsql/shop_001
+  storagePathPrefix String         @map("storage_path_prefix") // e.g. shops/shop_001/
+  createdAt         DateTime       @default(now()) @map("created_at")
+  users             PlatformUser[]
+
+  @@map("platform_shops")
+}
+
+model PlatformUser {
+  id           String       @id @default(uuid())
+  shopId       String       @map("shop_id")
+  email        String       @unique
+  passwordHash String       @map("password_hash")
+  role         String       @default("OWNER")
+  lastLogin    DateTime?    @map("last_login")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  shop PlatformShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId])
+  @@map("platform_users")
+}
