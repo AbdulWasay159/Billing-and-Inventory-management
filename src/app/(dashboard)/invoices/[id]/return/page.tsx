@@ -109,17 +109,17 @@ export default function ProcessReturnPage() {
     <div className="space-y-6 max-w-4xl mx-auto">
       <Link
         href={`/invoices/${id}`}
-        className="inline-flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-slate-800"
+        className="inline-flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-[#3563e9] transition-colors"
       >
         <ArrowLeft className="w-4 h-4" />
         <span>Cancel and return to invoice</span>
       </Link>
 
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs">
-        <div className="border-b border-slate-200 dark:border-slate-800 pb-4 mb-4">
+      <div className="card-3d bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm">
+        <div className="border-b border-slate-100 pb-4 mb-4">
           <div className="flex items-center gap-2">
-            <RotateCcw className="w-5 h-5 text-rose-500" />
-            <h1 className="text-xl font-bold text-slate-900 dark:text-white font-mono">
+            <RotateCcw className="w-5 h-5 text-rose-600" />
+            <h1 className="text-xl font-bold text-slate-900 font-mono">
               Process Return for {invoice.invoiceNumber}
             </h1>
           </div>
@@ -130,14 +130,14 @@ export default function ProcessReturnPage() {
 
         {error && (
           <div className="mb-4 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
             <span>{error}</span>
           </div>
         )}
 
         <form onSubmit={handleSubmitReturn} className="space-y-6">
           <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
               Return Reason / Notes
             </label>
             <input
@@ -145,23 +145,23 @@ export default function ProcessReturnPage() {
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="e.g. Defective piece / Wrong size"
-              className="w-full px-3 py-2 text-xs border rounded-lg"
+              className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#3563e9]/20 focus:border-[#3563e9] transition-all"
             />
           </div>
 
-          <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+          <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-600">
+              <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 select-none">
                 <tr>
-                  <th className="py-2.5 px-3">Item Description</th>
-                  <th className="py-2.5 px-3 text-right">Sold Qty</th>
-                  <th className="py-2.5 px-3 text-right">Already Returned</th>
-                  <th className="py-2.5 px-3 text-right">Returnable</th>
-                  <th className="py-2.5 px-3 text-center w-28">Return Qty</th>
-                  <th className="py-2.5 px-3 text-right">Refund Amount</th>
+                  <th className="py-2.5 px-3 uppercase tracking-wider text-[11px]">Item Description</th>
+                  <th className="py-2.5 px-3 text-right uppercase tracking-wider text-[11px]">Sold Qty</th>
+                  <th className="py-2.5 px-3 text-right uppercase tracking-wider text-[11px]">Already Returned</th>
+                  <th className="py-2.5 px-3 text-right uppercase tracking-wider text-[11px]">Returnable</th>
+                  <th className="py-2.5 px-3 text-center w-28 uppercase tracking-wider text-[11px]">Return Qty</th>
+                  <th className="py-2.5 px-3 text-right uppercase tracking-wider text-[11px]">Refund Amount</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              <tbody className="divide-y divide-slate-100">
                 {invoice.items.map((it) => {
                   const already = alreadyReturnedMap.get(it.id) || 0;
                   const returnable = it.quantity - already;
@@ -169,12 +169,12 @@ export default function ProcessReturnPage() {
                   const lineRefund = currentReturnQty * Number(it.sellingPriceSnapshot);
 
                   return (
-                    <tr key={it.id}>
+                    <tr key={it.id} className="hover:bg-slate-50/60">
                       <td className="py-2.5 px-3">
-                        <span className="font-semibold text-slate-900 dark:text-white">
+                        <span className="font-semibold text-slate-900">
                           {it.productNameSnapshot}
                         </span>
-                        <span className="block text-[11px] font-mono text-slate-400">
+                        <span className="block text-[11px] font-mono text-[#3563e9]">
                           {it.productIdSnapshot} {it.sizeSnapshot ? `· ${it.sizeSnapshot}` : ''}
                         </span>
                       </td>
@@ -195,7 +195,7 @@ export default function ProcessReturnPage() {
                             handleReturnQtyChange(it.id, Number(e.target.value), returnable)
                           }
                           placeholder="0"
-                          className="w-16 px-2 py-1 text-center font-bold border rounded-lg text-xs"
+                          className="w-16 px-2 py-1 text-center font-bold border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-[#3563e9]/20 focus:border-[#3563e9] focus:outline-none disabled:bg-slate-50 disabled:text-slate-300"
                         />
                       </td>
                       <td className="py-2.5 px-3 text-right font-mono font-bold text-rose-600">
@@ -208,24 +208,24 @@ export default function ProcessReturnPage() {
             </table>
           </div>
 
-          <div className="flex justify-between items-center pt-4 border-t text-sm font-semibold">
-            <span>Total Refund Amount to Customer:</span>
+          <div className="flex justify-between items-center pt-4 border-t border-slate-100 text-sm font-semibold">
+            <span className="text-slate-700">Total Refund Amount to Customer:</span>
             <span className="text-xl font-bold font-mono text-rose-600">
               ₹{totalRefundAmount.toFixed(2)}
             </span>
           </div>
 
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="flex justify-end gap-2.5 pt-2">
             <Link
               href={`/invoices/${id}`}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 border rounded-xl"
+              className="px-4 py-2 text-xs font-semibold text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
             >
               Cancel
             </Link>
             <button
               type="submit"
               disabled={submitting || totalRefundAmount <= 0}
-              className="px-5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 rounded-xl"
+              className="px-5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 active:bg-rose-800 disabled:opacity-50 rounded-xl shadow-sm shadow-rose-600/20 transition-all"
             >
               {submitting ? 'Processing Return...' : 'Confirm Return & Restore Stock'}
             </button>

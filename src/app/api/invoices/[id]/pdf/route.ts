@@ -3,11 +3,15 @@ import { NextResponse } from 'next/server';
 import { billingService } from '@/services/billing.service';
 import { getShopRepository } from '@/lib/db/connection-router';
 import { generateA4InvoicePdf } from '@/lib/pdf/a4-invoice-generator';
+import { requireAuthenticatedShop } from '@/lib/auth/guard';
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireAuthenticatedShop(request);
+  if (!auth.authorized) return auth.response;
+
   try {
     const { id } = await params;
     const invoice = await billingService.getInvoiceById(id);

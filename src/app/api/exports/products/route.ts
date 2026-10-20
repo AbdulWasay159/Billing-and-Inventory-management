@@ -2,8 +2,12 @@
 import { NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 import { importExportService } from '@/services/import-export.service';
+import { requireAuthenticatedShop } from '@/lib/auth/guard';
 
 export async function GET(request: Request) {
+  const auth = await requireAuthenticatedShop(request);
+  if (!auth.authorized) return auth.response;
+
   try {
     const { searchParams } = new URL(request.url);
     const format = searchParams.get('format') === 'csv' ? 'csv' : 'xlsx';

@@ -175,6 +175,7 @@ export interface MonthlyBillingSummary {
   totalInvoices: number;
   totalSales: number;
   invoices: {
+    id?: string;
     invoiceNumber: string;
     billDate: string;
     finalTotal: number;

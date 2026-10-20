@@ -1,6 +1,7 @@
 // src/lib/db/local-adapter.ts
 import fs from 'fs';
 import path from 'path';
+import bcrypt from 'bcryptjs';
 import {
   Product,
   PriceHistory,
@@ -27,6 +28,18 @@ import {
 const DATA_DIR = path.join(process.cwd(), '.tradestock-data');
 const DB_FILE = path.join(DATA_DIR, 'shop-database.json');
 
+export interface LocalUserData {
+  id: string;
+  email: string;
+  passwordHash: string;
+  name: string;
+  role: string;
+  phone?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface DatabaseSchema {
   profile: ShopProfile;
   products: Product[];
@@ -37,6 +50,7 @@ interface DatabaseSchema {
   customFieldDefinitions: CustomFieldDefinition[];
   customFieldValues: Record<string, Record<string, string>>; // productId -> { fieldKey: value }
   lastInvoiceSequence: number;
+  users?: LocalUserData[];
 }
 
 function getInitialData(): DatabaseSchema {
@@ -270,10 +284,23 @@ function getInitialData(): DatabaseSchema {
     ],
     customFieldValues: {},
     lastInvoiceSequence: 1000,
+    users: [
+      {
+        id: 'user_owner_001',
+        email: 'owner@tradestock.com',
+        passwordHash: bcrypt.hashSync('password123', 10),
+        name: 'Shop Owner',
+        role: 'OWNER',
+        phone: '+91 98765 43210',
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ],
   };
 }
 
-class LocalDatabaseManager {
+export class LocalDatabaseManager {
   private static instance: LocalDatabaseManager;
   private data: DatabaseSchema;
   private isLoaded = false;
@@ -298,6 +325,10 @@ class LocalDatabaseManager {
       if (fs.existsSync(DB_FILE)) {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
         this.data = JSON.parse(raw);
+        if (!this.data.users || this.data.users.length === 0) {
+          this.data.users = getInitialData().users;
+          this.save();
+        }
       } else {
         this.save();
       }
@@ -326,6 +357,25 @@ class LocalDatabaseManager {
 
   public persist(): void {
     this.save();
+  }
+
+  public getUserByEmail(email: string): LocalUserData | null {
+    const users = this.getData().users || [];
+    return users.find((u) => u.email.toLowerCase() === email.toLowerCase()) || null;
+  }
+
+  public updateUser(email: string, updates: Partial<LocalUserData>): LocalUserData | null {
+    const data = this.getData();
+    if (!data.users) data.users = [];
+    const idx = data.users.findIndex((u) => u.email.toLowerCase() === email.toLowerCase());
+    if (idx === -1) return null;
+    data.users[idx] = {
+      ...data.users[idx],
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+    this.persist();
+    return data.users[idx];
   }
 }
 
@@ -689,6 +739,7 @@ export class LocalInvoiceRepository implements IInvoiceRepository {
       totalInvoices: invoices.length,
       totalSales: Math.round(totalSales * 100) / 100,
       invoices: invoices.map((inv) => ({
+        id: inv.id,
         invoiceNumber: inv.invoiceNumber,
         billDate: inv.billDate,
         finalTotal: Number(inv.finalTotal),

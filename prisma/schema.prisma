@@ -212,3 +212,25 @@ model AuditLog {
   @@index([createdAt])
   @@map("audit_logs")
 }
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  role         String   @default("OWNER") // OWNER, ADMIN, STAFF
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model SequenceCounter {
+  name         String   @id // e.g. "INVOICE", "RETURN"
+  currentValue Int      @default(0) @map("current_value")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("sequence_counters")
+}
+

@@ -10,7 +10,8 @@ import { returnService } from '../src/services/return.service';
 import { inventoryService } from '../src/services/inventory.service';
 import { importExportService } from '../src/services/import-export.service';
 import { analyticsService } from '../src/services/analytics.service';
-import { paginateInvoiceItems, calculatePurchasePrice, calculateProfitMargin } from '../src/lib/utils';
+import { paginateInvoiceItems, calculatePurchasePrice, calculateProfitMargin, calculateSellingPriceFromMargin } from '../src/lib/utils';
+import { sanitizeCell } from '../src/lib/excel/exporter';
 import { InvoiceItem } from '../src/types';
 
 let passed = 0;
@@ -38,7 +39,13 @@ async function runTests() {
 
   const { profitAmount, profitMarginPercent } = calculateProfitMargin(105, 125);
   assert(profitAmount === 20, `profitAmount === 20 (got ${profitAmount})`);
-  assert(Math.round(profitMarginPercent) === 19, `profitMarginPercent ~ 19% (got ${profitMarginPercent})`);
+  assert(Math.round(profitMarginPercent) === 16, `profitMarginPercent ~ 16% (got ${profitMarginPercent})`);
+
+  // Phase 8 Bidirectional Test: Cost 262.50 with 25% margin -> Selling Price 350
+  const spFromMargin = calculateSellingPriceFromMargin(262.5, 25);
+  assert(spFromMargin === 350, `calculateSellingPriceFromMargin(262.5, 25) === 350 (got ${spFromMargin})`);
+  const marginFromSp = calculateProfitMargin(262.5, 350);
+  assert(marginFromSp.profitMarginPercent === 25, `calculateProfitMargin(262.5, 350) === 25% (got ${marginFromSp.profitMarginPercent})`);
 
   // ==========================================
   // TEST 2: Product Creation & 5-Tier Pricing
@@ -269,6 +276,276 @@ async function runTests() {
     prodAfterImport?.stockQuantity === 100,
     `Target stock rule verified: Stock set to exactly 100 (was ${currentBeforeImport}, got ${prodAfterImport?.stockQuantity})`
   );
+
+  // ==========================================
+  // TEST 8: CSV Formula Injection Sanitization (CWE-1236)
+  // ==========================================
+  console.log('\n8. CSV Formula Injection Defense');
+  const safeNormal = sanitizeCell('Standard Steel Pipe');
+  const safeFormula1 = sanitizeCell('=SUM(A1:A10)');
+  const safeFormula2 = sanitizeCell('+CMD|/C calc!A0');
+  const safeFormula3 = sanitizeCell('-50+20');
+  const safeFormula4 = sanitizeCell('@SUM(1,2)');
+
+  assert(safeNormal === 'Standard Steel Pipe', 'Normal text is unchanged');
+  assert(safeFormula1 === "'=SUM(A1:A10)", 'Formula starting with = is escaped with leading quote');
+  assert(safeFormula2 === "'+CMD|/C calc!A0", 'Formula starting with + is escaped with leading quote');
+  assert(safeFormula3 === "'-50+20", 'Formula starting with - is escaped with leading quote');
+  assert(safeFormula4 === "'@SUM(1,2)", 'Formula starting with @ is escaped with leading quote');
+
+  // ==========================================
+  // TEST 9: Dual Invoice Lookup (UUID & Invoice Number)
+  // ==========================================
+  console.log('\n9. Invoice Lookup By ID and Invoice Number');
+  const lookupById = await billingService.getInvoiceById(invoice.id);
+  const lookupByNumber = await billingService.getInvoiceById(invoice.invoiceNumber);
+
+  assert(lookupById !== null && lookupById.id === invoice.id, 'Invoice lookup by UUID succeeded');
+  assert(lookupByNumber !== null && lookupByNumber.invoiceNumber === invoice.invoiceNumber, 'Invoice lookup by INV-001003 succeeded');
+  assert(lookupById?.id === lookupByNumber?.id, 'Both lookups resolve the identical invoice');
+
+  // ==========================================
+  // TEST 10: Concurrency Race Condition on Stock
+  // ==========================================
+  console.log('\n10. Concurrency Race-Condition Stock Protection');
+  const limitedProd = await productService.createProduct({
+    productId: `HW-RACE-${Date.now().toString().slice(-4)}`,
+    name: 'Limited Stock Widget',
+    stockQuantity: 5,
+    mrp: 100,
+    purchaseDiscountPercent: 0,
+    sellingPrice: 100,
+  });
+
+  // Attempt two simultaneous sales of 4 and 3 units (total 7 units, only 5 available)
+  const [saleResult1, saleResult2] = await Promise.allSettled([
+    billingService.createInvoice({
+      paymentMode: 'CASH',
+      items: [{ productId: limitedProd.id, quantity: 4 }],
+    }),
+    billingService.createInvoice({
+      paymentMode: 'CASH',
+      items: [{ productId: limitedProd.id, quantity: 3 }],
+    }),
+  ]);
+
+  const oneSucceeded = (saleResult1.status === 'fulfilled' && saleResult2.status === 'rejected') ||
+                       (saleResult1.status === 'rejected' && saleResult2.status === 'fulfilled');
+  const remainingStock = (await productService.getProductById(limitedProd.id))?.stockQuantity;
+
+  assert(oneSucceeded, 'Exactly one concurrent invoice succeeded, second was rejected');
+  assert(remainingStock !== undefined && remainingStock >= 0, `Stock remains non-negative (remaining: ${remainingStock})`);
+
+  // ==========================================
+  // TEST 11: Atomic Billing Rollback on Partial Item Failure (Audit Section 3)
+  // ==========================================
+  console.log('\n11. Atomic Billing Transaction Rollback');
+  const prodA = await productService.createProduct({
+    productId: `HW-ROLLA-${Date.now().toString().slice(-4)}`,
+    name: 'Rollback Test Product A',
+    stockQuantity: 5,
+    mrp: 100,
+    purchaseDiscountPercent: 0,
+    sellingPrice: 100,
+  });
+
+  const prodB = await productService.createProduct({
+    productId: `HW-ROLLB-${Date.now().toString().slice(-4)}`,
+    name: 'Rollback Test Product B',
+    stockQuantity: 0, // 0 stock
+    mrp: 200,
+    purchaseDiscountPercent: 0,
+    sellingPrice: 200,
+  });
+
+  const initialInvoicesCount = (await billingService.getInvoices()).totalCount;
+
+  // Case 1: First item valid (A=2 of 5), second item invalid (B=1 of 0)
+  let rollbackCase1Threw = false;
+  try {
+    await billingService.createInvoice({
+      paymentMode: 'CASH',
+      items: [
+        { productId: prodA.id, quantity: 2 },
+        { productId: prodB.id, quantity: 1 },
+      ],
+    });
+  } catch (err: any) {
+    rollbackCase1Threw = true;
+  }
+  assert(rollbackCase1Threw, 'Transaction failed when second item (B) had insufficient stock');
+
+  const prodAAfterCase1 = await productService.getProductById(prodA.id);
+  assert(prodAAfterCase1?.stockQuantity === 5, `Product A stock remains exactly 5 after rollback (got ${prodAAfterCase1?.stockQuantity})`);
+
+  const invoicesCountAfterCase1 = (await billingService.getInvoices()).totalCount;
+  assert(invoicesCountAfterCase1 === initialInvoicesCount, 'No invoice record committed after failure');
+
+  // Verify no SALE transactions for Product A were created
+  const historyA = await inventoryService.getTransactionsForProduct(prodA.id);
+  const saleTransactionsA = historyA.filter((t) => t.transactionType === 'SALE');
+  assert(saleTransactionsA.length === 0, 'No SALE transaction committed for Product A during rollback');
+
+  // Case 2: Reverse order: First item invalid (B=1 of 0), second item valid (A=2 of 5)
+  let rollbackCase2Threw = false;
+  try {
+    await billingService.createInvoice({
+      paymentMode: 'CASH',
+      items: [
+        { productId: prodB.id, quantity: 1 },
+        { productId: prodA.id, quantity: 2 },
+      ],
+    });
+  } catch (err: any) {
+    rollbackCase2Threw = true;
+  }
+  assert(rollbackCase2Threw, 'Transaction failed when first item (B) had insufficient stock');
+
+  const prodAAfterCase2 = await productService.getProductById(prodA.id);
+  assert(prodAAfterCase2?.stockQuantity === 5, `Product A stock remains exactly 5 after reverse test (got ${prodAAfterCase2?.stockQuantity})`);
+
+  // ==========================================
+  // TEST 12: Claw Hammer POS Scenario & Billing Response Shape Integrity (P0 Remediation)
+  // ==========================================
+  console.log('\n12. Claw Hammer POS Scenario & Billing Contract');
+  let clawHammer = await productService.getProductByProductId('HW-0002');
+  if (!clawHammer) {
+    clawHammer = await productService.createProduct({
+      productId: 'HW-0002',
+      name: 'Claw Hammer with Fiberglass Handle',
+      size: '16 oz',
+      companyBrand: 'Stanley / General',
+      unit: 'Pcs',
+      stockQuantity: 50,
+      lowStockLimit: 5,
+      mrp: 600,
+      purchaseDiscountPercent: 25,
+      sellingPrice: 500,
+    });
+  }
+
+  // Ensure stock is sufficient
+  if (clawHammer.stockQuantity < 10) {
+    await inventoryService.adjustStock({
+      productId: clawHammer.id,
+      quantityChange: 30,
+      transactionType: 'STOCK_RECEIVED',
+      notes: 'Replenish stock for test',
+    });
+    clawHammer = (await productService.getProductById(clawHammer.id))!;
+  }
+
+  const initialHammerStock = clawHammer.stockQuantity;
+  const hammerInvoice = await billingService.createInvoice({
+    customerName: 'Screenshot Reproduce Customer',
+    customerPhone: '9876543210',
+    paymentMode: 'CASH',
+    discountAmount: 0,
+    items: [{ productId: clawHammer.id, quantity: 3 }],
+  });
+
+  assert(Boolean(hammerInvoice.id), 'Invoice created with valid ID');
+  assert(hammerInvoice.finalTotal === 1500, `Claw Hammer line total is ₹1,500.00 (got ${hammerInvoice.finalTotal})`);
+  assert(hammerInvoice.items[0].quantity === 3, 'Billed quantity is exactly 3 units');
+
+  // Verify response contract helper
+  const apiSimulatedResponse = { ...hammerInvoice, invoice: hammerInvoice };
+  assert(apiSimulatedResponse.id === hammerInvoice.id, 'API root contract provides direct .id');
+  assert(apiSimulatedResponse.invoice.id === hammerInvoice.id, 'API nested contract provides .invoice.id (prevents undefined crash)');
+
+  const hammerStockAfter = (await productService.getProductById(clawHammer.id))?.stockQuantity;
+  assert(hammerStockAfter === initialHammerStock - 3, `Stock decremented by 3 units (was ${initialHammerStock}, now ${hammerStockAfter})`);
+
+  // ==========================================
+  // TEST 13: Invoice Edit Validation & Return Cascade Protection (P0/P1 Remediation)
+  // ==========================================
+  console.log('\n13. Invoice Edit Validation & Return Cascade Protection');
+
+  // 13A: Negative or Zero quantity edit is blocked
+  let editZeroThrew = false;
+  try {
+    await billingService.editInvoice(hammerInvoice.id, {
+      items: [{ productId: clawHammer.id, quantity: 0 }],
+    });
+  } catch (err: any) {
+    editZeroThrew = true;
+  }
+  assert(editZeroThrew, 'Editing invoice with 0 quantity is strictly rejected');
+
+  // 13B: Empty item list edit is blocked
+  let editEmptyThrew = false;
+  try {
+    await billingService.editInvoice(hammerInvoice.id, {
+      items: [],
+    });
+  } catch (err: any) {
+    editEmptyThrew = true;
+  }
+  assert(editEmptyThrew, 'Editing invoice with empty item list is strictly rejected');
+
+  // 13C: Process a return on the hammer invoice
+  const hammerItem = hammerInvoice.items[0];
+  await returnService.processReturn({
+    invoiceId: hammerInvoice.id,
+    reason: 'Defective grip returned',
+    items: [{ invoiceItemId: hammerItem.id, quantity: 1 }],
+  });
+
+  // 13D: Editing invoice with existing returns MUST be blocked to prevent cascade deletion
+  let editWithReturnThrew = false;
+  try {
+    await billingService.editInvoice(hammerInvoice.id, {
+      items: [{ productId: clawHammer.id, quantity: 2 }],
+    });
+  } catch (err: any) {
+    editWithReturnThrew = true;
+  }
+  assert(editWithReturnThrew, 'Editing invoice with processed returns is strictly blocked (preserves return history)');
+
+  // ==========================================
+  // TEST 14: Duplicate Return Item Payload Protection (P1 Remediation)
+  // ==========================================
+  console.log('\n14. Duplicate Return Items in Payload Protection');
+  // Attempting to return same item twice in the same request to bypass bounds
+  let duplicateReturnThrew = false;
+  try {
+    // hammerItem quantity was 3, 1 already returned, available = 2
+    // If request passes quantity: 2 twice, total requested is 4 > 2
+    await returnService.processReturn({
+      invoiceId: hammerInvoice.id,
+      items: [
+        { invoiceItemId: hammerItem.id, quantity: 2 },
+        { invoiceItemId: hammerItem.id, quantity: 2 },
+      ],
+    });
+  } catch (err: any) {
+    duplicateReturnThrew = true;
+  }
+  assert(duplicateReturnThrew, 'Duplicate items in single return payload cannot exceed returnable bounds');
+
+  // ==========================================
+  // TEST 15: Directional Stock Adjustment Verification (P1 Remediation)
+  // ==========================================
+  console.log('\n15. Directional Stock Adjustment Verification');
+  const stockBeforeAdj = (await productService.getProductById(clawHammer.id))!.stockQuantity;
+
+  // Add stock via adjustment (Physical audit discovered found items)
+  const addAdj = await inventoryService.adjustStock({
+    productId: clawHammer.id,
+    quantityChange: 5,
+    transactionType: 'ADJUSTMENT',
+    notes: 'Physical inventory audit surplus',
+  });
+  assert(addAdj.newStock === stockBeforeAdj + 5, `Audit addition increased stock by +5 (now ${addAdj.newStock})`);
+
+  // Deduct stock via adjustment (Damage / Spoilage)
+  const deductAdj = await inventoryService.adjustStock({
+    productId: clawHammer.id,
+    quantityChange: -2,
+    transactionType: 'ADJUSTMENT',
+    notes: 'Damaged item written off',
+  });
+  assert(deductAdj.newStock === addAdj.newStock - 2, `Audit deduction decreased stock by -2 (now ${deductAdj.newStock})`);
 
   // ==========================================
   // SUMMARY

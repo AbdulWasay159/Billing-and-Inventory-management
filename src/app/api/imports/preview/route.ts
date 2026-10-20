@@ -1,8 +1,12 @@
 // src/app/api/imports/preview/route.ts
 import { NextResponse } from 'next/server';
 import { importExportService } from '@/services/import-export.service';
+import { requireAuthenticatedShop } from '@/lib/auth/guard';
 
 export async function POST(request: Request) {
+  const auth = await requireAuthenticatedShop(request);
+  if (!auth.authorized) return auth.response;
+
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;

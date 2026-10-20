@@ -40,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# tradestock local data & storage
+.tradestock-data/
+.tradestock-storage/

@@ -23,23 +23,25 @@ export function generateA4InvoicePdf(invoice: Invoice, shop: ShopProfile): jsPDF
 
     const marginX = 14;
     let currentY = 16;
+    const curr = shop?.currencySymbol && shop.currencySymbol !== '₹' ? `${shop.currencySymbol} ` : 'Rs. ';
+    const shopName = (shop?.name || 'TradeStock Store').toUpperCase();
 
     // Header Section
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(16);
     doc.setTextColor(30, 41, 59); // Slate-800
-    doc.text(shop.name.toUpperCase(), marginX, currentY);
+    doc.text(shopName, marginX, currentY);
 
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(71, 85, 105); // Slate-600
     currentY += 5;
-    if (shop.address) {
+    if (shop?.address) {
       doc.text(shop.address, marginX, currentY);
       currentY += 4;
     }
-    if (shop.phone) {
-      doc.text(`Phone: ${shop.phone}  |  Email: ${shop.email}`, marginX, currentY);
+    if (shop?.phone || shop?.email) {
+      doc.text(`Phone: ${shop.phone || '—'}  |  Email: ${shop.email || '—'}`, marginX, currentY);
       currentY += 5;
     }
 
@@ -87,8 +89,8 @@ export function generateA4InvoicePdf(invoice: Invoice, shop: ShopProfile): jsPDF
         item.sizeSnapshot || '—',
         item.quantity.toString(),
         item.unitSnapshot,
-        `₹${Number(item.sellingPriceSnapshot).toFixed(2)}`,
-        `₹${Number(item.lineTotal).toFixed(2)}`,
+        `${curr}${Number(item.sellingPriceSnapshot).toFixed(2)}`,
+        `${curr}${Number(item.lineTotal).toFixed(2)}`,
       ];
     });
 
@@ -112,13 +114,13 @@ export function generateA4InvoicePdf(invoice: Invoice, shop: ShopProfile): jsPDF
         3: { cellWidth: 18, halign: 'center' },
         4: { cellWidth: 14, halign: 'right' },
         5: { cellWidth: 14, halign: 'center' },
-        6: { cellWidth: 22, halign: 'right' },
+        6: { cellWidth: 24, halign: 'right' },
         7: { cellWidth: 26, halign: 'right' },
       },
       styles: {
         fontSize: 8,
         cellPadding: 1.8,
-        overflow: 'ellipsize',
+        overflow: 'linebreak',
       },
       didDrawPage: () => {
         // Footer section inside page bounds
@@ -133,31 +135,44 @@ export function generateA4InvoicePdf(invoice: Invoice, shop: ShopProfile): jsPDF
 
         // Page Subtotal
         doc.text(
-          `Page ${pageChunk.pageNumber} Subtotal: ₹${pageChunk.pageSubtotal.toFixed(2)}`,
+          `Page ${pageChunk.pageNumber} Subtotal: ${curr}${pageChunk.pageSubtotal.toFixed(2)}`,
           marginX,
           pageBottomY - 9
         );
 
-        // If last page, print Grand Total and Payment Details
+        // If last page, print Subtotal, Discount, Grand Total and Payment Details
         if (pageChunk.isLastPage) {
+          const discountVal = Number(invoice.discountAmount || 0);
+          const subtotalVal = Number(invoice.subtotal || invoice.finalTotal);
+
+          if (discountVal > 0) {
+            doc.setFontSize(7.5);
+            doc.text(
+              `Subtotal: ${curr}${subtotalVal.toFixed(2)} | Disc: -${curr}${discountVal.toFixed(2)}`,
+              210 - marginX - 65,
+              pageBottomY - 13
+            );
+          }
+
           doc.setFont('helvetica', 'bold');
           doc.setTextColor(15, 23, 42);
-          doc.text(`GRAND TOTAL: ₹${Number(invoice.finalTotal).toFixed(2)}`, 210 - marginX - 55, pageBottomY - 9);
+          doc.setFontSize(9);
+          doc.text(`GRAND TOTAL: ${curr}${Number(invoice.finalTotal).toFixed(2)}`, 210 - marginX - 65, pageBottomY - 9);
 
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(8);
           doc.text(
             `Payment: ${invoice.paymentMode}  |  Items: ${invoice.items.length}`,
-            210 - marginX - 55,
+            210 - marginX - 65,
             pageBottomY - 5
           );
         } else {
           doc.setFont('helvetica', 'italic');
-          doc.text(`Continued on page ${pageChunk.pageNumber + 1}...`, 210 - marginX - 55, pageBottomY - 9);
+          doc.text(`Continued on page ${pageChunk.pageNumber + 1}...`, 210 - marginX - 65, pageBottomY - 9);
         }
 
         // Receipt Footer Note
-        if (shop.receiptFooterMessage) {
+        if (shop?.receiptFooterMessage) {
           doc.setFont('helvetica', 'italic');
           doc.setFontSize(7.5);
           doc.text(shop.receiptFooterMessage, marginX, pageBottomY - 4);

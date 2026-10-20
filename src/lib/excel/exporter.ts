@@ -2,13 +2,27 @@
 import * as XLSX from 'xlsx';
 import { Product } from '@/types';
 
+/**
+ * Sanitizes cell values to prevent CSV / Spreadsheet formula injection (CWE-1236).
+ * Prepends a single quote if string begins with =, +, -, @, tab, or carriage return.
+ */
+export function sanitizeCell(value: any): any {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^[=+\-@\t\r]/.test(trimmed)) {
+      return `'${value}`;
+    }
+  }
+  return value;
+}
+
 export function exportProductsToWorkbook(products: Product[]): XLSX.WorkBook {
   const rows = products.map((p) => ({
-    'Product ID': p.productId,
-    'Product Name': p.name,
-    'Size': p.size,
-    'Company / Brand': p.companyBrand,
-    'Unit': p.unit,
+    'Product ID': sanitizeCell(p.productId),
+    'Product Name': sanitizeCell(p.name),
+    'Size': sanitizeCell(p.size),
+    'Company / Brand': sanitizeCell(p.companyBrand),
+    'Unit': sanitizeCell(p.unit),
     'Stock': p.stockQuantity,
     'Low Stock Limit': p.lowStockLimit,
     'MRP': p.mrp,

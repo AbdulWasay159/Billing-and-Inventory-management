@@ -76,34 +76,34 @@ export default function ProductDetailPage() {
       {/* Back Button */}
       <Link
         href="/products"
-        className="inline-flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+        className="inline-flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-[#3563e9] transition-colors"
       >
         <ArrowLeft className="w-4 h-4" />
         <span>Back to Product Master</span>
       </Link>
 
       {/* Header Info */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="card-3d bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="font-mono text-xs font-bold px-2.5 py-0.5 rounded bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+            <span className="font-mono text-xs font-bold px-2.5 py-0.5 rounded-lg bg-[#3563e9]/10 text-[#3563e9] border border-[#3563e9]/20">
               {product.productId}
             </span>
-            <span className="text-xs text-slate-400 font-medium">{product.companyBrand}</span>
+            <span className="text-xs text-slate-500 font-medium">{product.companyBrand}</span>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+          <h1 className="text-2xl font-bold text-slate-900 mt-1 tracking-tight">
             {product.name}
           </h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Size: <strong className="text-slate-700 dark:text-slate-300">{product.size || 'Standard'}</strong> | Unit:{' '}
-            <strong className="text-slate-700 dark:text-slate-300">{product.unit}</strong>
+            Size: <strong className="text-slate-800">{product.size || 'Standard'}</strong> | Unit:{' '}
+            <strong className="text-slate-800">{product.unit}</strong>
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="text-right">
-            <p className="text-xs text-slate-500">Available Stock</p>
-            <p className="text-2xl font-bold text-slate-900 dark:text-white font-mono">
+          <div className="text-right sm:border-l sm:border-slate-100 sm:pl-6">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Available Stock</p>
+            <p className="text-2xl font-bold text-slate-900 font-mono mt-0.5">
               {formatQuantity(product.stockQuantity, product.unit)}
             </p>
           </div>
@@ -111,69 +111,69 @@ export default function ProductDetailPage() {
       </div>
 
       {/* 5-Tier Pricing Matrix Card (Section 7) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs">
-        <h2 className="text-base font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+      <div className="card-3d bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm">
+        <h2 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
           <span>5-Tier Pricing Breakdown</span>
         </h2>
 
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
-          <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-100 dark:border-slate-800">
-            <span className="text-xs text-slate-500 block mb-1">1. MRP</span>
-            <strong className="text-lg font-mono text-slate-900 dark:text-white">
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/60">
+            <span className="text-xs font-medium text-slate-500 block mb-1">1. MRP</span>
+            <strong className="text-lg font-mono text-slate-900">
               ₹{Number(product.mrp).toFixed(2)}
             </strong>
           </div>
 
-          <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-100 dark:border-slate-800">
-            <span className="text-xs text-slate-500 block mb-1">2. Discount %</span>
-            <strong className="text-lg font-mono text-slate-900 dark:text-white">
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/60">
+            <span className="text-xs font-medium text-slate-500 block mb-1">2. Discount %</span>
+            <strong className="text-lg font-mono text-slate-900">
               {product.purchaseDiscountPercent}%
             </strong>
           </div>
 
-          <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-100 dark:border-slate-800">
-            <span className="text-xs text-slate-500 block mb-1">3. Purchase Cost</span>
-            <strong className="text-lg font-mono text-slate-900 dark:text-white">
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/60">
+            <span className="text-xs font-medium text-slate-500 block mb-1">3. Purchase Cost</span>
+            <strong className="text-lg font-mono text-slate-900">
               ₹{Number(product.purchasePrice).toFixed(2)}
             </strong>
           </div>
 
-          <div className="p-3 bg-amber-50/50 dark:bg-amber-950/20 rounded-xl border border-amber-200 dark:border-amber-900/40">
-            <span className="text-xs text-amber-700 dark:text-amber-400 block mb-1">
+          <div className="p-3 bg-amber-50/50 rounded-xl border border-amber-200/70">
+            <span className="text-xs text-amber-800 font-medium block mb-1">
               4. Previous Rate
             </span>
-            <strong className="text-lg font-mono text-amber-800 dark:text-amber-300">
+            <strong className="text-lg font-mono text-amber-900">
               {product.previousSellingPrice !== null && product.previousSellingPrice !== undefined
                 ? `₹${Number(product.previousSellingPrice).toFixed(2)}`
                 : '—'}
             </strong>
           </div>
 
-          <div className="p-3 bg-indigo-50 dark:bg-indigo-950/50 rounded-xl border border-indigo-200 dark:border-indigo-800">
-            <span className="text-xs text-indigo-700 dark:text-indigo-400 font-bold block mb-1">
+          <div className="p-3 bg-[#3563e9]/10 rounded-xl border border-[#3563e9]/30">
+            <span className="text-xs text-[#3563e9] font-bold block mb-1">
               5. Current Rate
             </span>
-            <strong className="text-xl font-mono text-indigo-700 dark:text-indigo-300 font-bold">
+            <strong className="text-xl font-mono text-[#3563e9] font-bold">
               ₹{Number(product.sellingPrice).toFixed(2)}
             </strong>
           </div>
         </div>
 
-        <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center text-xs text-slate-500">
+        <div className="mt-4 pt-4 border-t border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs text-slate-500">
           <span>
-            Profit Markup: <strong>₹{(product.sellingPrice - product.purchasePrice).toFixed(2)}</strong> ({product.profitMarginPercent}%)
+            Net Profit: <strong className="text-[#3563e9]">₹{(product.sellingPrice - product.purchasePrice).toFixed(2)}</strong> / unit &nbsp;|&nbsp; Gross Margin: <strong className="text-violet-700">{product.profitMarginPercent}%</strong> of selling rate
           </span>
           <span className="text-slate-400">
-            Note: No separate profit reports are generated, adhering to business specs.
+            Note: 5-Tier pricing updates synchronously across billing.
           </span>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Price History Timeline (Section 24) */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs">
-          <h2 className="text-base font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-            <Clock className="w-4 h-4 text-indigo-500" />
+        <div className="card-3d bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm">
+          <h2 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
+            <Clock className="w-4 h-4 text-[#3563e9]" />
             <span>Price Change History Log</span>
           </h2>
 
@@ -186,16 +186,16 @@ export default function ProductDetailPage() {
               {priceHistory.map((ph) => (
                 <div
                   key={ph.id}
-                  className="p-3.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 text-xs flex justify-between items-center"
+                  className="p-3.5 rounded-xl border border-slate-200/70 bg-slate-50/50 text-xs flex justify-between items-center"
                 >
                   <div>
-                    <p className="font-semibold text-slate-800 dark:text-white">
+                    <p className="font-semibold text-slate-800">
                       Selling Rate: ₹{Number(ph.oldSellingPrice).toFixed(2)} →{' '}
-                      <span className="text-indigo-600 font-bold">
+                      <span className="text-[#3563e9] font-bold">
                         ₹{Number(ph.newSellingPrice).toFixed(2)}
                       </span>
                     </p>
-                    <p className="text-slate-400 text-[11px] mt-0.5">
+                    <p className="text-slate-500 text-[11px] mt-0.5">
                       Purchase: ₹{Number(ph.oldPurchasePrice).toFixed(2)} → ₹
                       {Number(ph.newPurchasePrice).toFixed(2)} ({ph.changeReason || 'Manual edit'})
                     </p>
@@ -214,13 +214,13 @@ export default function ProductDetailPage() {
         </div>
 
         {/* Product-Wise Sales History (Section 20) */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs">
+        <div className="card-3d bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <Receipt className="w-4 h-4 text-emerald-500" />
+            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <Receipt className="w-4 h-4 text-[#3563e9]" />
               <span>Product-Wise Sales History</span>
             </h2>
-            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-[#3563e9]/10 text-[#3563e9] border border-[#3563e9]/20">
               Sold: {salesSummary?.totalQuantitySold || 0} {product.unit}
             </span>
           </div>
@@ -235,19 +235,19 @@ export default function ProductDetailPage() {
                 <Link
                   key={inv.invoiceId}
                   href={`/invoices/${inv.invoiceId}`}
-                  className="p-3 rounded-xl border border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center justify-between text-xs"
+                  className="p-3 rounded-xl border border-slate-200/70 hover:bg-slate-50 transition-colors flex items-center justify-between text-xs"
                 >
                   <div>
-                    <span className="font-mono font-bold text-indigo-600">{inv.invoiceNumber}</span>
+                    <span className="font-mono font-bold text-[#3563e9]">{inv.invoiceNumber}</span>
                     <p className="text-[11px] text-slate-400 mt-0.5">
                       {new Date(inv.date).toLocaleDateString('en-IN')}
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="font-semibold text-slate-800 dark:text-white">
+                    <p className="font-semibold text-slate-800">
                       {inv.quantity} {product.unit} @ ₹{inv.sellingPrice.toFixed(2)}
                     </p>
-                    <p className="font-bold text-slate-900 dark:text-white font-mono">
+                    <p className="font-bold text-slate-900 font-mono">
                       ₹{inv.lineTotal.toFixed(2)}
                     </p>
                   </div>

@@ -1,8 +1,12 @@
 // src/app/api/products/route.ts
 import { NextResponse } from 'next/server';
 import { productService } from '@/services/product.service';
+import { requireAuthenticatedShop } from '@/lib/auth/guard';
 
 export async function GET(request: Request) {
+  const auth = await requireAuthenticatedShop(request);
+  if (!auth.authorized) return auth.response;
+
   try {
     const { searchParams } = new URL(request.url);
     const search = searchParams.get('search') || undefined;
@@ -26,6 +30,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireAuthenticatedShop(request);
+  if (!auth.authorized) return auth.response;
+
   try {
     const body = await request.json();
     const product = await productService.createProduct(body);

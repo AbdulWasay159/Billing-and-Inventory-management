@@ -1,5 +1,6 @@
 // src/services/analytics.service.ts
-import { getInvoiceRepository, getProductRepository } from '@/lib/db/connection-router';
+import { getInvoiceRepository, getProductRepository, isPrismaConfigured } from '@/lib/db/connection-router';
+import { prisma } from '@/lib/db/prisma';
 import { DashboardStats, MonthlyBillingSummary, ProductSalesSummary, Product } from '@/types';
 
 export class AnalyticsService {
@@ -32,6 +33,10 @@ export class AnalyticsService {
     return this.invoiceRepo.getProductSalesSummary(productId, startDate, endDate);
   }
 
+  /**
+   * Database-Side SQL Aggregation (Audit Finding #6)
+   * When PostgreSQL / Prisma is active, groups and sums directly in the database.
+   */
   async getAllProductsSalesSummary(
     startDate?: string,
     endDate?: string
@@ -44,6 +49,60 @@ export class AnalyticsService {
     totalQuantitySold: number;
     totalRevenue: number;
   }[]> {
+    if (isPrismaConfigured()) {
+      const where: any = {
+        invoice: {
+          status: { not: 'CANCELLED' },
+        },
+      };
+
+      if (startDate || endDate) {
+        where.invoice.billDate = {};
+        if (startDate) where.invoice.billDate.gte = new Date(startDate);
+        if (endDate) where.invoice.billDate.lte = new Date(endDate);
+      }
+
+      // Fast SQL GROUP BY aggregation
+      const grouped = await prisma.invoiceItem.groupBy({
+        by: ['productId'],
+        where,
+        _sum: {
+          quantity: true,
+          lineTotal: true,
+        },
+      });
+
+      if (grouped.length === 0) return [];
+
+      const productIds = grouped.map((g) => g.productId);
+      const products = await prisma.product.findMany({
+        where: { id: { in: productIds } },
+        select: { id: true, productId: true, name: true, size: true, unit: true },
+      });
+
+      const productMap = new Map(products.map((p) => [p.id, p]));
+
+      return grouped
+        .map((g) => {
+          const p = productMap.get(g.productId);
+          const totalQty = Number(g._sum.quantity || 0);
+          const totalRev = Number(g._sum.lineTotal || 0);
+
+          return {
+            productId: g.productId,
+            productCode: p?.productId || 'UNKNOWN',
+            name: p?.name || 'Unknown Product',
+            size: p?.size || '',
+            unit: p?.unit || 'Pcs',
+            totalQuantitySold: Math.round(totalQty * 100) / 100,
+            totalRevenue: Math.round(totalRev * 100) / 100,
+          };
+        })
+        .filter((p) => p.totalQuantitySold > 0)
+        .sort((a, b) => b.totalQuantitySold - a.totalQuantitySold);
+    }
+
+    // Local in-memory fallback
     const { products } = await this.productRepo.findMany({ limit: 10000 });
     const { invoices } = await this.invoiceRepo.findMany({ startDate, endDate, limit: 10000 });
 

@@ -83,11 +83,15 @@ export default function AnalyticsPage() {
 
   const handleExportMonthlyCsv = () => {
     if (!monthlySummary) return;
+    const sanitizeCsv = (val: string) => {
+      const trimmed = String(val).trim();
+      return /^[=+\-@\t\r]/.test(trimmed) ? `'${trimmed}` : trimmed;
+    };
     const header = 'Invoice Number,Date,Total Amount,Payment Mode\n';
     const rows = monthlySummary.invoices
       .map(
         (i) =>
-          `"${i.invoiceNumber}","${new Date(i.billDate).toLocaleDateString('en-IN')}",${i.finalTotal},"${i.paymentMode}"`
+          `"${sanitizeCsv(i.invoiceNumber)}","${new Date(i.billDate).toLocaleDateString('en-IN')}",${i.finalTotal},"${sanitizeCsv(i.paymentMode)}"`
       )
       .join('\n');
     const footer = `\n"Total Invoices",${monthlySummary.totalInvoices},"Total Sales",${monthlySummary.totalSales}`;
@@ -104,7 +108,7 @@ export default function AnalyticsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 print:hidden">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
             Sales & Billing Analytics
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
@@ -113,23 +117,23 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Tab switch */}
-        <div className="inline-flex rounded-xl bg-slate-200/80 dark:bg-slate-800 p-1 text-xs font-semibold self-start sm:self-auto">
+        <div className="inline-flex rounded-xl bg-slate-200/70 p-1 text-xs font-semibold self-start sm:self-auto shadow-inner">
           <button
             onClick={() => setActiveTab('monthly')}
-            className={`px-3.5 py-1.5 rounded-lg transition-all ${
+            className={`px-4 py-1.5 rounded-lg transition-all ${
               activeTab === 'monthly'
-                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400'
+                ? 'bg-gradient-to-r from-[#3563e9] to-[#7656e8] text-white shadow-sm font-semibold'
+                : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             Monthly Billing Summary
           </button>
           <button
             onClick={() => setActiveTab('products')}
-            className={`px-3.5 py-1.5 rounded-lg transition-all ${
+            className={`px-4 py-1.5 rounded-lg transition-all ${
               activeTab === 'products'
-                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400'
+                ? 'bg-gradient-to-r from-[#3563e9] to-[#7656e8] text-white shadow-sm font-semibold'
+                : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             Product-Wise Sales
@@ -140,15 +144,15 @@ export default function AnalyticsPage() {
       {activeTab === 'monthly' ? (
         <div className="space-y-4">
           {/* Controls bar (Hidden during print) */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs flex flex-wrap items-center justify-between gap-3 print:hidden">
+          <div className="card-3d bg-white border border-slate-200/80 p-4 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-3 print:hidden">
             <div className="flex items-center gap-3">
-              <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+              <label className="text-xs font-semibold text-slate-600">
                 Select Month:
               </label>
               <select
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border rounded-lg text-xs font-semibold"
+                className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#3563e9]/20 focus:border-[#3563e9]"
               >
                 {[
                   'January', 'February', 'March', 'April', 'May', 'June',
@@ -163,9 +167,9 @@ export default function AnalyticsPage() {
               <select
                 value={selectedYear}
                 onChange={(e) => setSelectedYear(Number(e.target.value))}
-                className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border rounded-lg text-xs font-semibold"
+                className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#3563e9]/20 focus:border-[#3563e9]"
               >
-                {[2024, 2025, 2026, 2027].map((y) => (
+                {Array.from({ length: 6 }, (_, idx) => new Date().getFullYear() - 3 + idx).map((y) => (
                   <option key={y} value={y}>
                     {y}
                   </option>
@@ -176,7 +180,7 @@ export default function AnalyticsPage() {
             <div className="flex items-center gap-2">
               <button
                 onClick={handleExportMonthlyCsv}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-xs"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Export CSV</span>
@@ -184,7 +188,7 @@ export default function AnalyticsPage() {
 
               <button
                 onClick={handlePrintMonthlySummary}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 shadow-xs"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-[#3563e9] to-[#7656e8] hover:opacity-95 rounded-xl shadow-md shadow-[#3563e9]/20 transition-all"
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>Print Summary</span>
@@ -193,13 +197,13 @@ export default function AnalyticsPage() {
           </div>
 
           {/* Printable Monthly Summary Sheet (Section 18 & 36) */}
-          <div className="bg-white text-slate-900 border border-slate-200 rounded-2xl shadow-xs overflow-hidden p-6 sm:p-8 print:border-none print:shadow-none print:p-0">
+          <div className="card-3d bg-white text-slate-900 border border-slate-200/90 rounded-2xl shadow-sm overflow-hidden p-6 sm:p-8 print:border-none print:shadow-none print:p-0">
             <div className="border-b border-slate-200 pb-4 mb-4 flex justify-between items-start">
               <div>
                 <h2 className="text-xl font-bold uppercase tracking-tight text-slate-900">
                   Monthly Billing Summary
                 </h2>
-                <p className="text-sm font-semibold text-indigo-700 mt-1">
+                <p className="text-sm font-semibold text-[#3563e9] mt-1">
                   {monthlySummary?.month || 'Loading...'}
                 </p>
               </div>
@@ -224,31 +228,31 @@ export default function AnalyticsPage() {
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="border-b-2 border-slate-300 text-slate-700 bg-slate-50">
-                        <th className="py-2.5 px-4 font-bold text-center w-12">#</th>
-                        <th className="py-2.5 px-4 font-bold">Invoice Number</th>
-                        <th className="py-2.5 px-4 font-bold">Date</th>
-                        <th className="py-2.5 px-4 font-bold text-center">Payment Mode</th>
-                        <th className="py-2.5 px-4 font-bold text-right">Total Amount</th>
+                        <th className="py-2.5 px-4 font-bold text-center w-12 uppercase tracking-wider text-[11px]">#</th>
+                        <th className="py-2.5 px-4 font-bold uppercase tracking-wider text-[11px]">Invoice Number</th>
+                        <th className="py-2.5 px-4 font-bold uppercase tracking-wider text-[11px]">Date</th>
+                        <th className="py-2.5 px-4 font-bold text-center uppercase tracking-wider text-[11px]">Payment Mode</th>
+                        <th className="py-2.5 px-4 font-bold text-right uppercase tracking-wider text-[11px]">Total Amount</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-mono">
                       {monthlySummary.invoices.map((inv, idx) => (
-                        <tr key={inv.invoiceNumber} className="hover:bg-slate-50/50">
-                          <td className="py-2 px-4 text-center text-slate-400 font-sans">{idx + 1}</td>
-                          <td className="py-2 px-4 font-bold text-indigo-600">
-                            <Link href={`/invoices/${inv.invoiceNumber}`} className="hover:underline">
+                        <tr key={inv.invoiceNumber} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="py-2.5 px-4 text-center text-slate-400 font-sans">{idx + 1}</td>
+                          <td className="py-2.5 px-4 font-bold text-[#3563e9]">
+                            <Link href={`/invoices/${inv.id || inv.invoiceNumber}`} className="hover:underline">
                               {inv.invoiceNumber}
                             </Link>
                           </td>
-                          <td className="py-2 px-4 text-slate-600 font-sans">
+                          <td className="py-2.5 px-4 text-slate-600 font-sans">
                             {new Date(inv.billDate).toLocaleDateString('en-IN')}
                           </td>
-                          <td className="py-2 px-4 text-center font-sans">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
+                          <td className="py-2.5 px-4 text-center font-sans">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200/60">
                               {inv.paymentMode}
                             </span>
                           </td>
-                          <td className="py-2 px-4 text-right font-bold text-slate-900">
+                          <td className="py-2.5 px-4 text-right font-bold text-slate-900">
                             {formatCurrency(inv.finalTotal)}
                           </td>
                         </tr>
@@ -268,7 +272,7 @@ export default function AnalyticsPage() {
 
                   <div className="flex items-baseline gap-2">
                     <span className="text-sm font-bold uppercase text-slate-700">Total Month Sales:</span>
-                    <span className="font-mono text-2xl font-bold text-indigo-700">
+                    <span className="font-mono text-2xl font-bold text-[#3563e9]">
                       {formatCurrency(monthlySummary.totalSales)}
                     </span>
                   </div>
@@ -279,9 +283,9 @@ export default function AnalyticsPage() {
         </div>
       ) : (
         /* Product-Wise Sales Quantity Table (Section 19 & 20) */
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
-            <h2 className="font-bold text-base text-slate-900 dark:text-white">
+        <div className="card-3d bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-200 bg-slate-50/50">
+            <h2 className="font-bold text-base text-slate-900">
               Product-Wise Quantity Sold (All-Time)
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -291,17 +295,17 @@ export default function AnalyticsPage() {
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
+              <thead className="bg-slate-100/80 text-slate-600 border-b border-slate-200 select-none">
                 <tr>
-                  <th className="py-3 px-4 font-bold">Item Code</th>
-                  <th className="py-3 px-4 font-semibold">Product Name</th>
-                  <th className="py-3 px-4 font-semibold">Size</th>
-                  <th className="py-3 px-4 font-semibold text-right">Units Sold</th>
-                  <th className="py-3 px-4 font-semibold text-right">Total Revenue</th>
-                  <th className="py-3 px-4 font-semibold text-center">Sales History</th>
+                  <th className="py-3 px-4 font-bold uppercase tracking-wider text-[11px]">Item Code</th>
+                  <th className="py-3 px-4 font-semibold uppercase tracking-wider text-[11px]">Product Name</th>
+                  <th className="py-3 px-4 font-semibold uppercase tracking-wider text-[11px]">Size</th>
+                  <th className="py-3 px-4 font-semibold text-right uppercase tracking-wider text-[11px]">Units Sold</th>
+                  <th className="py-3 px-4 font-semibold text-right uppercase tracking-wider text-[11px]">Total Revenue</th>
+                  <th className="py-3 px-4 font-semibold text-center uppercase tracking-wider text-[11px]">Sales History</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
+              <tbody className="divide-y divide-slate-100 font-mono">
                 {loadingProducts ? (
                   <tr>
                     <td colSpan={6} className="py-12 text-center text-slate-400 font-sans">
@@ -316,26 +320,26 @@ export default function AnalyticsPage() {
                   </tr>
                 ) : (
                   productSales.map((ps) => (
-                    <tr key={ps.productId} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
-                      <td className="py-3 px-4 font-bold text-indigo-600 dark:text-indigo-400">
+                    <tr key={ps.productId} className="hover:bg-slate-50/70 transition-colors">
+                      <td className="py-3 px-4 font-bold text-[#3563e9]">
                         {ps.productCode}
                       </td>
-                      <td className="py-3 px-4 font-sans font-medium text-slate-900 dark:text-white">
+                      <td className="py-3 px-4 font-sans font-medium text-slate-900">
                         {ps.name}
                       </td>
-                      <td className="py-3 px-4 text-slate-600 dark:text-slate-300">
+                      <td className="py-3 px-4 text-slate-600">
                         {ps.size || '—'}
                       </td>
-                      <td className="py-3 px-4 text-right font-bold text-slate-900 dark:text-white text-sm">
+                      <td className="py-3 px-4 text-right font-bold text-slate-900 text-sm">
                         {formatQuantity(ps.totalQuantitySold, ps.unit)}
                       </td>
-                      <td className="py-3 px-4 text-right font-bold text-emerald-600">
+                      <td className="py-3 px-4 text-right font-bold text-slate-900">
                         {formatCurrency(ps.totalRevenue)}
                       </td>
                       <td className="py-3 px-4 text-center font-sans">
                         <Link
                           href={`/products/${ps.productId}`}
-                          className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100"
+                          className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-[#3563e9]/10 text-[#3563e9] border border-[#3563e9]/20 hover:bg-[#3563e9]/15 transition-colors"
                         >
                           View Invoices
                         </Link>

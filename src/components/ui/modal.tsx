@@ -47,28 +47,29 @@ export function Modal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in duration-150">
       <div
-        className={`w-full ${maxWidthClasses[maxWidth]} bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]`}
+        className={`w-full ${maxWidthClasses[maxWidth]} bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{title}</h3>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/60">
+          <h3 className="text-base font-bold text-slate-900">{title}</h3>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+            aria-label="Close dialog"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-6 overflow-y-auto">{children}</div>
+        <div className="p-6 overflow-y-auto text-sm text-slate-700">{children}</div>
 
         {/* Footer */}
         {footer && (
-          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/60">
             {footer}
           </div>
         )}
@@ -109,17 +110,17 @@ export function ConfirmModal({
           <button
             onClick={onClose}
             disabled={isLoading}
-            className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+            className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors focus:outline-none"
           >
             {cancelText}
           </button>
           <button
             onClick={onConfirm}
             disabled={isLoading}
-            className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors ${
+            className={`px-4 py-2 text-xs font-semibold text-white rounded-xl shadow-xs transition-colors focus:outline-none ${
               isDanger
-                ? 'bg-rose-600 hover:bg-rose-700 focus:ring-rose-500'
-                : 'bg-indigo-600 hover:bg-indigo-700 focus:ring-indigo-500'
+                ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-600/20'
+                : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
             }`}
           >
             {isLoading ? 'Processing...' : confirmText}
@@ -127,7 +128,7 @@ export function ConfirmModal({
         </>
       }
     >
-      <p className="text-slate-600 dark:text-slate-300 text-sm leading-relaxed">{message}</p>
+      <p className="text-slate-600 text-sm leading-relaxed">{message}</p>
     </Modal>
   );
 }

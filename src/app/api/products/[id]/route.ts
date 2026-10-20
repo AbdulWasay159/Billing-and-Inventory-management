@@ -1,11 +1,15 @@
 // src/app/api/products/[id]/route.ts
 import { NextResponse } from 'next/server';
 import { productService } from '@/services/product.service';
+import { requireAuthenticatedShop } from '@/lib/auth/guard';
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireAuthenticatedShop(request);
+  if (!auth.authorized) return auth.response;
+
   try {
     const { id } = await params;
     const product = await productService.getProductById(id);
@@ -23,6 +27,9 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireAuthenticatedShop(request);
+  if (!auth.authorized) return auth.response;
+
   try {
     const { id } = await params;
     const body = await request.json();
@@ -37,6 +44,9 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireAuthenticatedShop(request);
+  if (!auth.authorized) return auth.response;
+
   try {
     const { id } = await params;
     const success = await productService.deleteProduct(id);

@@ -1,6 +1,7 @@
 // src/app/api/products/columns/route.ts
 import { NextResponse } from 'next/server';
 import { getCustomFieldRepository } from '@/lib/db/connection-router';
+import { requireAuthenticatedShop } from '@/lib/auth/guard';
 
 const PROTECTED_SYSTEM_FIELDS = [
   'product_id',
@@ -17,7 +18,10 @@ const PROTECTED_SYSTEM_FIELDS = [
   'selling_price',
 ];
 
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAuthenticatedShop(request);
+  if (!auth.authorized) return auth.response;
+
   try {
     const customFieldRepo = getCustomFieldRepository();
     const columns = await customFieldRepo.getDefinitions();
@@ -28,6 +32,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireAuthenticatedShop(request);
+  if (!auth.authorized) return auth.response;
+
   try {
     const { label, dataType } = await request.json();
     if (!label || !label.trim()) {
@@ -55,6 +62,9 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const auth = await requireAuthenticatedShop(request);
+  if (!auth.authorized) return auth.response;
+
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');

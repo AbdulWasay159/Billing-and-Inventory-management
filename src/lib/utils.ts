@@ -38,9 +38,19 @@ export function calculateProfitMargin(purchasePrice: number, sellingPrice: numbe
   profitMarginPercent: number;
 } {
   const profitAmount = Math.round((sellingPrice - purchasePrice) * 100) / 100;
+  // Phase 8: Gross Profit Margin (%) = ((Selling Price - Purchase Cost) / Selling Price) * 100
   const profitMarginPercent =
-    purchasePrice > 0 ? Math.round((profitAmount / purchasePrice) * 10000) / 100 : 0;
+    sellingPrice > 0 ? Math.round(((sellingPrice - purchasePrice) / sellingPrice) * 10000) / 100 : 0;
   return { profitAmount, profitMarginPercent };
+}
+
+export function calculateSellingPriceFromMargin(purchasePrice: number, marginPercent: number): number {
+  if (purchasePrice <= 0) return 0;
+  if (marginPercent >= 100) return purchasePrice;
+  if (marginPercent < 0) return purchasePrice;
+  // Phase 8: Selling Price = Purchase Cost / (1 - Profit Margin / 100)
+  const sellingPrice = purchasePrice / (1 - marginPercent / 100);
+  return Math.round(sellingPrice * 100) / 100;
 }
 
 /**
