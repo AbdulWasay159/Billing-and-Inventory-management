@@ -18,6 +18,10 @@ export interface ProductFilter {
   isActive?: boolean;
   lowStockOnly?: boolean;
   outOfStockOnly?: boolean;
+  brand?: string;
+  size?: string;
+  unit?: string;
+  stockStatus?: 'all' | 'inStock' | 'lowStock' | 'outOfStock';
   limit?: number;
   offset?: number;
 }
@@ -26,6 +30,12 @@ export interface IProductRepository {
   findById(id: string): Promise<Product | null>;
   findByProductId(productId: string): Promise<Product | null>;
   findMany(filter?: ProductFilter): Promise<{ products: Product[]; totalCount: number }>;
+  getDistinctFilterOptions(): Promise<{
+    brands: string[];
+    sizes: string[];
+    units: string[];
+    totalActiveCount: number;
+  }>;
   create(product: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>): Promise<Product>;
   update(id: string, product: Partial<Product>): Promise<Product>;
   softDelete(id: string): Promise<boolean>;

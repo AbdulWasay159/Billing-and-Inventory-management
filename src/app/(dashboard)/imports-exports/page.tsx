@@ -1,7 +1,7 @@
 // src/app/(dashboard)/imports-exports/page.tsx
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   FileSpreadsheet,
   Upload,
@@ -12,10 +12,12 @@ import {
   FileCheck,
   RefreshCw,
   Info,
+  Filter,
+  Search,
 } from 'lucide-react';
 import { formatCurrency, formatQuantity } from '@/lib/utils';
 import { ImportPreviewRow, ImportSummary } from '@/types';
-import { ConfirmModal } from '@/components/ui/modal';
+import { Modal, ConfirmModal } from '@/components/ui/modal';
 
 export default function ImportsExportsPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -37,7 +39,59 @@ export default function ImportsExportsPage() {
   const [showCommitConfirm, setShowCommitConfirm] = useState(false);
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
 
+  // Filtered Export Modal State
+  const [filterModalFormat, setFilterModalFormat] = useState<'xlsx' | 'csv' | null>(null);
+  const [availableBrands, setAvailableBrands] = useState<string[]>([]);
+  const [loadingBrands, setLoadingBrands] = useState(false);
+  const [brandSearch, setBrandSearch] = useState('');
+  const [selectedBrand, setSelectedBrand] = useState('');
+  const [brandProductCount, setBrandProductCount] = useState<number | null>(null);
+  const [loadingBrandCount, setLoadingBrandCount] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const openFilterExportModal = async (format: 'xlsx' | 'csv') => {
+    setFilterModalFormat(format);
+    setBrandSearch('');
+    setSelectedBrand('');
+    setBrandProductCount(null);
+    setLoadingBrands(true);
+    try {
+      const res = await fetch('/api/products/filters');
+      if (res.ok) {
+        const data = await res.json();
+        setAvailableBrands(data.brands || []);
+      }
+    } catch (err) {
+      console.error('Failed to load brands for export:', err);
+    } finally {
+      setLoadingBrands(false);
+    }
+  };
+
+  const handleSelectBrandForExport = async (brand: string) => {
+    setSelectedBrand(brand);
+    setLoadingBrandCount(true);
+    try {
+      const res = await fetch(`/api/products?brand=${encodeURIComponent(brand)}&limit=1`);
+      if (res.ok) {
+        const data = await res.json();
+        setBrandProductCount(data.totalCount || 0);
+      }
+    } catch (err) {
+      console.error('Failed to load product count for brand:', err);
+      setBrandProductCount(null);
+    } finally {
+      setLoadingBrandCount(false);
+    }
+  };
+
+  const handleDownloadFiltered = () => {
+    if (!filterModalFormat || !selectedBrand) return;
+    const url = `/api/exports/products?format=${filterModalFormat}&brand=${encodeURIComponent(selectedBrand)}`;
+    window.location.href = url;
+    setFilterModalFormat(null);
+  };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
@@ -129,17 +183,26 @@ export default function ImportsExportsPage() {
               </h3>
             </div>
             <p className="text-xs text-slate-500">
-              Download complete product catalog formatted with canonical headers ready for external editing.
+              Download product catalog with live Excel formulas for Purchase Price and Selling Price calculations.
             </p>
           </div>
-          <a
-            href="/api/exports/products?format=xlsx"
-            download
-            className="mt-4 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#3563e9]/10 text-[#3563e9] border border-[#3563e9]/20 font-semibold text-xs hover:bg-[#3563e9]/15 transition-colors self-start"
-          >
-            <Download className="w-4 h-4" />
-            <span>Download Excel Sheet</span>
-          </a>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <a
+              href="/api/exports/products?format=xlsx"
+              download
+              className="inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl bg-[#3563e9]/10 text-[#3563e9] border border-[#3563e9]/20 font-semibold text-xs hover:bg-[#3563e9]/15 transition-colors"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download Excel Sheet</span>
+            </a>
+            <button
+              onClick={() => openFilterExportModal('xlsx')}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-violet-50 text-violet-700 border border-violet-200 font-semibold text-xs hover:bg-violet-100 transition-colors shadow-2xs"
+            >
+              <Filter className="w-3.5 h-3.5" />
+              <span>Download by Filter</span>
+            </button>
+          </div>
         </div>
 
         <div className="card-3d bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
@@ -151,17 +214,26 @@ export default function ImportsExportsPage() {
               </h3>
             </div>
             <p className="text-xs text-slate-500">
-              Plain text CSV export compatible with any spreadsheet program or accounting software.
+              Plain text CSV export with calculated static values and formula injection protection.
             </p>
           </div>
-          <a
-            href="/api/exports/products?format=csv"
-            download
-            className="mt-4 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#3563e9]/10 text-[#3563e9] border border-[#3563e9]/20 font-semibold text-xs hover:bg-[#3563e9]/15 transition-colors self-start"
-          >
-            <Download className="w-4 h-4" />
-            <span>Download CSV File</span>
-          </a>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <a
+              href="/api/exports/products?format=csv"
+              download
+              className="inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl bg-[#3563e9]/10 text-[#3563e9] border border-[#3563e9]/20 font-semibold text-xs hover:bg-[#3563e9]/15 transition-colors"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download CSV File</span>
+            </a>
+            <button
+              onClick={() => openFilterExportModal('csv')}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-violet-50 text-violet-700 border border-violet-200 font-semibold text-xs hover:bg-violet-100 transition-colors shadow-2xs"
+            >
+              <Filter className="w-3.5 h-3.5" />
+              <span>Download by Filter</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -377,6 +449,103 @@ export default function ImportsExportsPage() {
         confirmText="Confirm & Apply"
         isLoading={committing}
       />
+
+      {/* Brand-Filtered Export Modal (Phase 6 requirement) */}
+      <Modal
+        isOpen={Boolean(filterModalFormat)}
+        onClose={() => setFilterModalFormat(null)}
+        title={`Export to ${filterModalFormat === 'csv' ? 'CSV (.csv)' : 'Excel (.xlsx)'} by Brand`}
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500">
+            Select a brand from your actual catalog. The exported spreadsheet will contain all matching products with permanent Product IDs and calculations intact.
+          </p>
+
+          {/* Search Brand */}
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+            <input
+              type="text"
+              value={brandSearch}
+              onChange={(e) => setBrandSearch(e.target.value)}
+              placeholder="Search available brands..."
+              className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3563e9]/20 focus:border-[#3563e9]"
+            />
+          </div>
+
+          {/* Brand List */}
+          <div className="border border-slate-200 rounded-xl p-2 max-h-48 overflow-y-auto space-y-1 bg-slate-50/50">
+            {loadingBrands ? (
+              <p className="text-xs text-slate-400 p-3 text-center">Loading brands from catalogue...</p>
+            ) : availableBrands.length === 0 ? (
+              <p className="text-xs text-slate-400 p-3 text-center">No brands found in catalogue.</p>
+            ) : (
+              availableBrands
+                .filter((b) => b.toLowerCase().includes(brandSearch.toLowerCase()))
+                .map((brand) => (
+                  <button
+                    key={brand}
+                    type="button"
+                    onClick={() => handleSelectBrandForExport(brand)}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-between ${
+                      selectedBrand === brand
+                        ? 'bg-[#3563e9] text-white shadow-2xs'
+                        : 'hover:bg-slate-200/60 text-slate-700'
+                    }`}
+                  >
+                    <span>{brand}</span>
+                    {selectedBrand === brand && (
+                      <span className="text-[11px] font-semibold text-blue-100">Selected</span>
+                    )}
+                  </button>
+                ))
+            )}
+          </div>
+
+          {/* Selected Brand Feedback */}
+          {selectedBrand && (
+            <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-xl text-xs text-blue-900 flex items-center justify-between">
+              <div>
+                <span className="font-semibold">Selected Brand:</span>{' '}
+                <span className="font-bold">{selectedBrand}</span>
+              </div>
+              <div className="text-right">
+                {loadingBrandCount ? (
+                  <span className="text-blue-500">Counting...</span>
+                ) : brandProductCount !== null ? (
+                  <span className="font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
+                    {brandProductCount} product{brandProductCount === 1 ? '' : 's'}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setFilterModalFormat(null)}
+              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!selectedBrand}
+              onClick={handleDownloadFiltered}
+              className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl text-white transition-all shadow-sm ${
+                selectedBrand
+                  ? 'bg-gradient-to-r from-[#3563e9] to-[#7656e8] hover:opacity-95 shadow-blue-500/25'
+                  : 'bg-slate-300 cursor-not-allowed opacity-60'
+              }`}
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download {filterModalFormat === 'csv' ? 'CSV' : 'Excel'}</span>
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

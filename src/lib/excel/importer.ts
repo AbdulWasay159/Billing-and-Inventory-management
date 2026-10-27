@@ -1,7 +1,7 @@
 // src/lib/excel/importer.ts
 import * as XLSX from 'xlsx';
 import { ImportPreviewRow, Product } from '@/types';
-import { calculatePurchasePrice, calculateProfitMargin } from '@/lib/utils';
+import { calculatePurchasePrice, calculateProfitMargin, calculateSellingPriceFromMargin } from '@/lib/utils';
 import { IProductRepository } from '@/lib/db/types';
 
 export interface ParseResult {
@@ -81,7 +81,8 @@ export async function parseAndValidateImportBuffer(
     const rawMrp = row['MRP'] ?? row['mrp'] ?? row['List Price'] ?? 0;
     const rawDisc = row['Discount %'] ?? row['Discount'] ?? row['purchase_discount_percent'] ?? 0;
     const rawPurchasePrice = row['Purchase Price'] ?? row['Cost Price'] ?? row['purchase_price'];
-    const rawSellingPrice = row['Selling Price'] ?? row['Sale Price'] ?? row['selling_price'] ?? 0;
+    const rawMargin = row['Profit Margin %'] ?? row['Margin %'] ?? row['profit_margin_percent'];
+    const rawSellingPrice = row['Selling Price'] ?? row['Sale Price'] ?? row['selling_price'];
     const rawLowStock = row['Low Stock Limit'] ?? row['Min Stock'] ?? row['low_stock_limit'] ?? 5;
 
     // Validation
@@ -119,18 +120,29 @@ export async function parseAndValidateImportBuffer(
       errors.push('Purchase Discount % must be between 0 and 100.');
     }
 
-    // Purchase Price calculation with safe override
-    let purchasePrice = calculatePurchasePrice(mrp, discountPercent);
+    // Purchase Price calculation with safe override support
+    const formulaCost = calculatePurchasePrice(mrp, discountPercent);
+    let purchasePrice = formulaCost;
     if (rawPurchasePrice !== undefined && rawPurchasePrice !== '') {
       const explicitCost = Number(rawPurchasePrice);
       if (!isNaN(explicitCost) && explicitCost >= 0) {
+        // If explicit cost was supplied, use it; if formula produces different value and MRP was set,
+        // formula recalculation takes priority unless explicit cost was manually intended override
         purchasePrice = explicitCost;
       }
     }
 
-    const sellingPrice = Number(rawSellingPrice);
+    let sellingPrice = Number(rawSellingPrice);
+    const parsedMargin = rawMargin !== undefined && rawMargin !== '' ? Number(rawMargin) : NaN;
+
     if (isNaN(sellingPrice) || sellingPrice <= 0) {
-      errors.push('Selling Price must be a positive number.');
+      // Try calculating selling price from margin % if available
+      if (!isNaN(parsedMargin) && parsedMargin >= 0 && parsedMargin < 100) {
+        sellingPrice = calculateSellingPriceFromMargin(purchasePrice, parsedMargin);
+      } else {
+        errors.push('Selling Price must be a positive number.');
+        sellingPrice = 0;
+      }
     }
 
     const lowStockLimit = Number(rawLowStock) >= 0 ? Number(rawLowStock) : 5;

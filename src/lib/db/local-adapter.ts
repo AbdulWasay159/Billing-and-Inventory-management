@@ -414,12 +414,50 @@ export class LocalProductRepository implements IProductRepository {
       );
     }
 
-    if (filter?.lowStockOnly) {
-      prods = prods.filter((p) => p.stockQuantity <= p.lowStockLimit && p.stockQuantity > 0);
+    // Brand filtering (handles "Unbranded" explicitly)
+    if (filter?.brand) {
+      const targetBrand = filter.brand.trim().toLowerCase();
+      if (
+        targetBrand === 'unbranded' ||
+        targetBrand === '(no brand)' ||
+        targetBrand === '__unbranded__'
+      ) {
+        prods = prods.filter((p) => !p.companyBrand || p.companyBrand.trim() === '');
+      } else {
+        prods = prods.filter(
+          (p) => p.companyBrand && p.companyBrand.trim().toLowerCase() === targetBrand
+        );
+      }
     }
 
-    if (filter?.outOfStockOnly) {
-      prods = prods.filter((p) => p.stockQuantity <= 0);
+    // Size filtering
+    if (filter?.size) {
+      const targetSize = filter.size.trim().toLowerCase();
+      prods = prods.filter((p) => p.size && p.size.trim().toLowerCase() === targetSize);
+    }
+
+    // Unit filtering
+    if (filter?.unit) {
+      const targetUnit = filter.unit.trim().toLowerCase();
+      prods = prods.filter((p) => p.unit && p.unit.trim().toLowerCase() === targetUnit);
+    }
+
+    // Stock Status filtering
+    if (filter?.stockStatus) {
+      if (filter.stockStatus === 'outOfStock') {
+        prods = prods.filter((p) => p.stockQuantity <= 0);
+      } else if (filter.stockStatus === 'lowStock') {
+        prods = prods.filter((p) => p.stockQuantity <= p.lowStockLimit && p.stockQuantity > 0);
+      } else if (filter.stockStatus === 'inStock') {
+        prods = prods.filter((p) => p.stockQuantity > p.lowStockLimit);
+      }
+    } else {
+      if (filter?.lowStockOnly) {
+        prods = prods.filter((p) => p.stockQuantity <= p.lowStockLimit && p.stockQuantity > 0);
+      }
+      if (filter?.outOfStockOnly) {
+        prods = prods.filter((p) => p.stockQuantity <= 0);
+      }
     }
 
     const totalCount = prods.length;
@@ -430,6 +468,46 @@ export class LocalProductRepository implements IProductRepository {
     }
 
     return { products: prods, totalCount };
+  }
+
+  async getDistinctFilterOptions(): Promise<{
+    brands: string[];
+    sizes: string[];
+    units: string[];
+    totalActiveCount: number;
+  }> {
+    const activeProducts = this.db.getData().products.filter((p) => p.isActive);
+    const brandSet = new Set<string>();
+    let hasUnbranded = false;
+    const sizeSet = new Set<string>();
+    const unitSet = new Set<string>();
+
+    for (const p of activeProducts) {
+      const b = (p.companyBrand || '').trim();
+      if (b) {
+        brandSet.add(b);
+      } else {
+        hasUnbranded = true;
+      }
+
+      const s = (p.size || '').trim();
+      if (s) sizeSet.add(s);
+
+      const u = (p.unit || '').trim();
+      if (u) unitSet.add(u);
+    }
+
+    const sortedBrands = Array.from(brandSet).sort((a, b) => a.localeCompare(b));
+    if (hasUnbranded) {
+      sortedBrands.push('Unbranded');
+    }
+
+    return {
+      brands: sortedBrands,
+      sizes: Array.from(sizeSet).sort((a, b) => a.localeCompare(b)),
+      units: Array.from(unitSet).sort((a, b) => a.localeCompare(b)),
+      totalActiveCount: activeProducts.length,
+    };
   }
 
   async create(productData: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>): Promise<Product> {

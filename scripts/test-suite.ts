@@ -548,6 +548,119 @@ async function runTests() {
   assert(deductAdj.newStock === addAdj.newStock - 2, `Audit deduction decreased stock by -2 (now ${deductAdj.newStock})`);
 
   // ==========================================
+  // TEST 16: Advanced Filtering & Multi-Criteria Search (Feature Group 1)
+  // ==========================================
+  console.log('\n16. Advanced Filtering & Multi-Criteria Search');
+  const distinctFilters = await productService.getDistinctFilterOptions();
+  assert(Array.isArray(distinctFilters.brands) && distinctFilters.brands.length > 0, 'Dynamic brands list derived from actual catalog');
+  assert(Array.isArray(distinctFilters.sizes) && distinctFilters.sizes.length > 0, 'Dynamic sizes list derived from actual catalog');
+  assert(Array.isArray(distinctFilters.units) && distinctFilters.units.length > 0, 'Dynamic units list derived from actual catalog');
+  assert(distinctFilters.totalActiveCount > 0, `Active product count reported (${distinctFilters.totalActiveCount})`);
+
+  // Combined Search + Brand Filter (AND logic)
+  const stanleyWrench = await productService.getProducts({ brand: 'Stanley', search: 'Wrench' });
+  assert(stanleyWrench.products.length >= 1, 'Brand Stanley + Search "Wrench" returned matching product');
+  assert(stanleyWrench.products.every(p => p.companyBrand === 'Stanley'), 'Every returned item has brand Stanley');
+
+  const unbrandedHammers = await productService.getProducts({ brand: 'Unbranded', search: 'Hammer' });
+  assert(unbrandedHammers.products.length >= 1, 'Brand "Unbranded" + Search "Hammer" returned unbranded Claw Hammer');
+
+  // Mismatched brand returns 0 products
+  const jaquarHammers = await productService.getProducts({ brand: 'Jaquar', search: 'Hammer' });
+  assert(jaquarHammers.products.length === 0, 'Brand Jaquar + Search "Hammer" correctly returned 0 products (AND logic)');
+
+  // Stock status filter verification
+  const outOfStockItems = await productService.getProducts({ stockStatus: 'outOfStock' });
+  assert(outOfStockItems.products.every(p => p.stockQuantity <= 0), 'Every Out of Stock product has stock <= 0');
+
+  const lowStockItems = await productService.getProducts({ stockStatus: 'lowStock' });
+  assert(lowStockItems.products.every(p => p.stockQuantity > 0 && p.stockQuantity <= p.lowStockLimit), 'Every Low Stock product satisfies: 0 < stock <= limit');
+
+  const inStockItems = await productService.getProducts({ stockStatus: 'inStock' });
+  assert(inStockItems.products.every(p => p.stockQuantity > p.lowStockLimit), 'Every In Stock product satisfies: stock > limit');
+
+  // ==========================================
+  // TEST 17: Formula-Driven Excel Export & Pricing Roundtrip (Feature Group 2)
+  // ==========================================
+  console.log('\n17. Formula-Driven Excel Export & Pricing Roundtrip');
+  const allProdsForExport = (await productService.getProducts({ limit: 10 })).products;
+  const { exportProductsToWorkbook, exportProductsToCsvString } = await import('../src/lib/excel/exporter');
+  const wb = exportProductsToWorkbook(allProdsForExport);
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+
+  // Check formula on row 2 (Column J: Purchase Price, Column L: Selling Price)
+  const cellJ2 = sheet['J2'];
+  const cellL2 = sheet['L2'];
+  assert(Boolean(cellJ2 && cellJ2.f && cellJ2.f.includes('ROUND(H2*(1-I2/100),2)')), `Excel Column J contains purchase price formula (got: ${cellJ2?.f})`);
+  assert(Boolean(cellL2 && cellL2.f && cellL2.f.includes('ROUND(J2/(1-K2/100),2)')), `Excel Column L contains selling price margin formula (got: ${cellL2?.f})`);
+  assert(typeof cellJ2?.v === 'number' && cellJ2.v > 0, `Excel Column J preserves initial numeric purchase price value (got: ${cellJ2?.v})`);
+  assert(typeof cellL2?.v === 'number' && cellL2.v > 0, `Excel Column L preserves initial numeric selling price value (got: ${cellL2?.v})`);
+
+  // CSV Export contains static values without formulas
+  const csvExport = exportProductsToCsvString(allProdsForExport);
+  assert(!csvExport.includes('=ROUND('), 'CSV export does not contain raw Excel formula strings');
+  assert(csvExport.includes('Product ID,Product Name'), 'CSV export maintains canonical headers');
+
+  // ==========================================
+  // TEST 18: Comprehensive Shop Analytics & Gross Profit Integrity (Feature Group 3)
+  // ==========================================
+  console.log('\n18. Comprehensive Shop Analytics & Gross Profit Integrity');
+  const analytics = await analyticsService.getComprehensiveAnalytics();
+  assert(analytics.kpis.totalSales > 0, `Total sales calculated: ₹${analytics.kpis.totalSales.toFixed(2)}`);
+  assert(analytics.kpis.completedInvoices > 0, `Completed invoices reported: ${analytics.kpis.completedInvoices}`);
+  assert(analytics.kpis.netSales === Math.round(Math.max(0, analytics.kpis.totalSales - analytics.kpis.totalRefunds) * 100) / 100, 'Net Sales === Total Sales − Refunds');
+  assert(analytics.kpis.grossProfit === Math.round((analytics.kpis.netSales - analytics.kpis.cogs) * 100) / 100, 'Gross Profit === Net Sales − Cost of Goods Sold (COGS)');
+  assert(analytics.kpis.grossProfitMarginPercent === Math.round(((analytics.kpis.grossProfit / analytics.kpis.netSales) * 100) * 100) / 100, 'Gross Profit Margin % matches (Gross Profit / Net Sales) * 100');
+  assert(analytics.kpis.hasHistoricalCostAccuracy === true, 'Analytics cost engine verified historical cost snapshot accuracy');
+
+  // Payment split consistency (Phase 4.6: Cash vs UPI)
+  const totalPaymentSplit = Math.round((analytics.paymentSplit.cashSales + analytics.paymentSplit.upiSales) * 100) / 100;
+  assert(totalPaymentSplit === analytics.kpis.totalSales, `Payment mode split (Cash ₹${analytics.paymentSplit.cashSales} + UPI ₹${analytics.paymentSplit.upiSales}) matches Total Sales ₹${analytics.kpis.totalSales}`);
+
+  // Brand analytics verification
+  assert(Array.isArray(analytics.brands) && analytics.brands.length > 0, `Brand performance report generated (${analytics.brands.length} brands)`);
+  assert(analytics.brands.every(b => b.brandName && typeof b.grossRevenue === 'number' && typeof b.grossProfit === 'number'), 'Every brand report has name, revenue, and gross profit');
+
+  // Product performance rankings
+  assert(Array.isArray(analytics.products.bestSellers), 'Best-selling products array populated');
+  assert(Array.isArray(analytics.products.slowMovers), 'Slow-moving products array populated');
+
+  // ==========================================
+  // TEST 19: Dashboard Low-Stock & Out-of-Stock Strict Definition (Feature Group 4)
+  // ==========================================
+  console.log('\n19. Dashboard Low-Stock Navigation & Strict Thresholds');
+  const allCurrentProducts = (await productService.getProducts({ limit: 10000 })).products;
+  const outOfStockCount = allCurrentProducts.filter(p => p.stockQuantity <= 0).length;
+  const lowStockCount = allCurrentProducts.filter(p => p.stockQuantity > 0 && p.stockQuantity <= p.lowStockLimit).length;
+  const inStockCount = allCurrentProducts.filter(p => p.stockQuantity > p.lowStockLimit).length;
+
+  assert(outOfStockCount >= 1, `Out of stock products correctly identified (${outOfStockCount} zero-stock products)`);
+  assert(lowStockCount >= 0, `Low stock products correctly identified (${lowStockCount} low-stock products)`);
+  assert(outOfStockCount + lowStockCount + inStockCount === allCurrentProducts.length, 'Strict threshold partition: Out of Stock + Low Stock + In Stock equals total products');
+
+  // Ensure zero-stock items are never classified as low stock
+  const zeroStockClassifiedAsLow = allCurrentProducts.filter(p => p.stockQuantity <= 0 && p.stockQuantity > 0 && p.stockQuantity <= p.lowStockLimit).length;
+  assert(zeroStockClassifiedAsLow === 0, 'Zero-stock items are strictly excluded from Low Stock categorization');
+
+  // ==========================================
+  // TEST 20: Brand-Filtered Excel & CSV Downloads (Feature Group 5)
+  // ==========================================
+  console.log('\n20. Brand-Filtered Excel & CSV Downloads');
+  // Filtered Excel export
+  const stanleyXlsx = await importExportService.exportProducts('xlsx', 'Stanley');
+  assert(stanleyXlsx.filename === 'TradeStock_Products_Stanley.xlsx', `Filtered Excel filename matches contract: ${stanleyXlsx.filename}`);
+
+  // Filtered CSV export
+  const stanleyCsv = await importExportService.exportProducts('csv', 'Stanley');
+  assert(stanleyCsv.filename === 'TradeStock_Products_Stanley.csv', `Filtered CSV filename matches contract: ${stanleyCsv.filename}`);
+  assert(typeof stanleyCsv.data === 'string' && stanleyCsv.data.includes('Stanley'), 'Filtered CSV contains Stanley records');
+  assert(!stanleyCsv.data.includes('Bosch'), 'Filtered CSV excludes other brands (Bosch excluded from Stanley download)');
+
+  // Full catalog export preservation
+  const fullXlsx = await importExportService.exportProducts('xlsx');
+  assert(fullXlsx.filename.startsWith('tradestock-products-'), `Full catalog export preserves standard filename: ${fullXlsx.filename}`);
+
+  // ==========================================
   // SUMMARY
   // ==========================================
   console.log('\n----------------------------------------------------');

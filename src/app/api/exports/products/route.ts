@@ -11,8 +11,9 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const format = searchParams.get('format') === 'csv' ? 'csv' : 'xlsx';
+    const brand = searchParams.get('brand') || undefined;
 
-    const { data, filename } = await importExportService.exportProducts(format);
+    const { data, filename } = await importExportService.exportProducts(format, brand);
 
     if (format === 'csv') {
       return new NextResponse(data as string, {

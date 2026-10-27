@@ -207,17 +207,23 @@ export class ImportExportService {
     };
   }
 
-  async exportProducts(format: 'xlsx' | 'csv' = 'xlsx'): Promise<{ data: any; filename: string }> {
-    const { products } = await this.productRepo.findMany({ limit: 10000 });
+  async exportProducts(format: 'xlsx' | 'csv' = 'xlsx', brand?: string): Promise<{ data: any; filename: string }> {
+    const filter: any = { limit: 10000 };
+    if (brand && brand !== 'all') {
+      filter.brand = brand;
+    }
+    const { products } = await this.productRepo.findMany(filter);
     const timestamp = new Date().toISOString().split('T')[0];
+    const sanitizedBrand = brand && brand !== 'all' ? brand.replace(/[^a-zA-Z0-9_-]/g, '_') : '';
+    const prefix = sanitizedBrand ? `TradeStock_Products_${sanitizedBrand}` : `tradestock-products-${timestamp}`;
 
     if (format === 'csv') {
       const csv = exportProductsToCsvString(products);
-      return { data: csv, filename: `tradestock-products-${timestamp}.csv` };
+      return { data: csv, filename: `${prefix}.csv` };
     }
 
     const wb = exportProductsToWorkbook(products);
-    return { data: wb, filename: `tradestock-products-${timestamp}.xlsx` };
+    return { data: wb, filename: `${prefix}.xlsx` };
   }
 }
 

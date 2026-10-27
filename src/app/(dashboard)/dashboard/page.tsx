@@ -196,33 +196,47 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Card 3: Low Stock Items */}
-        <div className="card-3d bg-white border border-amber-200/80 rounded-2xl p-5 shadow-sm flex items-center justify-between bg-amber-50/20">
+        {/* Card 3: Low Stock Items (Interactive Phase 5 Navigation) */}
+        <Link
+          href="/products?status=lowStock"
+          className="card-3d bg-white border border-amber-200/80 hover:border-amber-400 rounded-2xl p-5 shadow-sm flex items-center justify-between bg-amber-50/20 hover:bg-amber-50/40 transition-all cursor-pointer group"
+          title="Click to view all low stock products"
+        >
           <div>
             <p className="text-xs font-semibold text-amber-700 uppercase tracking-wider">Low Stock Limit</p>
             <h3 className="text-2xl font-bold text-amber-900 mt-1 tracking-tight">
               {loading ? '—' : data?.stats.lowStockCount || 0}
             </h3>
-            <p className="text-xs text-amber-600 mt-2 font-medium">Reorder recommended</p>
+            <span className="text-xs text-amber-600 mt-2 font-medium flex items-center gap-1 group-hover:underline">
+              <span>View low stock items</span>
+              <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+            </span>
           </div>
-          <div className="p-3 rounded-2xl bg-amber-100 text-amber-800 border border-amber-200">
+          <div className="p-3 rounded-2xl bg-amber-100 text-amber-800 border border-amber-200 group-hover:scale-105 transition-transform">
             <AlertTriangle className="w-6 h-6" />
           </div>
-        </div>
+        </Link>
 
-        {/* Card 4: Out of Stock */}
-        <div className="card-3d bg-white border border-rose-200/80 rounded-2xl p-5 shadow-sm flex items-center justify-between bg-rose-50/20">
+        {/* Card 4: Out of Stock (Interactive Phase 5 Navigation) */}
+        <Link
+          href="/products?status=outOfStock"
+          className="card-3d bg-white border border-rose-200/80 hover:border-rose-400 rounded-2xl p-5 shadow-sm flex items-center justify-between bg-rose-50/20 hover:bg-rose-50/40 transition-all cursor-pointer group"
+          title="Click to view all out of stock products"
+        >
           <div>
             <p className="text-xs font-semibold text-rose-700 uppercase tracking-wider">Out of Stock</p>
             <h3 className="text-2xl font-bold text-rose-900 mt-1 tracking-tight">
               {loading ? '—' : data?.stats.outOfStockCount || 0}
             </h3>
-            <p className="text-xs text-rose-600 mt-2 font-medium">Depleted zero units</p>
+            <span className="text-xs text-rose-600 mt-2 font-medium flex items-center gap-1 group-hover:underline">
+              <span>View out of stock items</span>
+              <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+            </span>
           </div>
-          <div className="p-3 rounded-2xl bg-rose-100 text-rose-800 border border-rose-200">
+          <div className="p-3 rounded-2xl bg-rose-100 text-rose-800 border border-rose-200 group-hover:scale-105 transition-transform">
             <XCircle className="w-6 h-6" />
           </div>
-        </div>
+        </Link>
       </div>
 
       {/* Quick Action Bar with Royal Blue & Violet Identity */}

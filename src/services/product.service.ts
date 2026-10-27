@@ -12,10 +12,18 @@ export class ProductService {
     isActive?: boolean;
     lowStockOnly?: boolean;
     outOfStockOnly?: boolean;
+    brand?: string;
+    size?: string;
+    unit?: string;
+    stockStatus?: 'all' | 'inStock' | 'lowStock' | 'outOfStock';
     limit?: number;
     offset?: number;
   }) {
     return this.productRepo.findMany(params);
+  }
+
+  async getDistinctFilterOptions() {
+    return this.productRepo.getDistinctFilterOptions();
   }
 
   async getProductById(id: string): Promise<Product | null> {

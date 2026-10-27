@@ -199,10 +199,35 @@ export class PrismaProductRepository implements IProductRepository {
         { name: { contains: q, mode: 'insensitive' } },
         { productId: { contains: q, mode: 'insensitive' } },
         { companyBrand: { contains: q, mode: 'insensitive' } },
+        { size: { contains: q, mode: 'insensitive' } },
       ];
     }
 
-    if (filter?.outOfStockOnly) {
+    if (filter?.brand) {
+      const targetBrand = filter.brand.trim();
+      if (
+        targetBrand.toLowerCase() === 'unbranded' ||
+        targetBrand.toLowerCase() === '(no brand)' ||
+        targetBrand === '__unbranded__'
+      ) {
+        where.OR = [
+          { companyBrand: null },
+          { companyBrand: '' },
+        ];
+      } else {
+        where.companyBrand = { equals: targetBrand, mode: 'insensitive' };
+      }
+    }
+
+    if (filter?.size) {
+      where.size = { equals: filter.size.trim(), mode: 'insensitive' };
+    }
+
+    if (filter?.unit) {
+      where.unit = { equals: filter.unit.trim(), mode: 'insensitive' };
+    }
+
+    if (filter?.stockStatus === 'outOfStock' || filter?.outOfStockOnly) {
       where.stockQuantity = { lte: 0 };
     }
 
@@ -223,11 +248,57 @@ export class PrismaProductRepository implements IProductRepository {
 
     let mapped = products.map(mapProduct);
 
-    if (filter?.lowStockOnly) {
+    if (filter?.stockStatus === 'lowStock' || filter?.lowStockOnly) {
       mapped = mapped.filter((p) => p.stockQuantity > 0 && p.stockQuantity <= p.lowStockLimit);
+    } else if (filter?.stockStatus === 'inStock') {
+      mapped = mapped.filter((p) => p.stockQuantity > p.lowStockLimit);
     }
 
     return { products: mapped, totalCount };
+  }
+
+  async getDistinctFilterOptions(): Promise<{
+    brands: string[];
+    sizes: string[];
+    units: string[];
+    totalActiveCount: number;
+  }> {
+    const products = await prisma.product.findMany({
+      where: { isActive: true },
+      select: { companyBrand: true, size: true, unit: true },
+    });
+
+    const brandSet = new Set<string>();
+    let hasUnbranded = false;
+    const sizeSet = new Set<string>();
+    const unitSet = new Set<string>();
+
+    for (const p of products) {
+      const b = (p.companyBrand || '').trim();
+      if (b) {
+        brandSet.add(b);
+      } else {
+        hasUnbranded = true;
+      }
+
+      const s = (p.size || '').trim();
+      if (s) sizeSet.add(s);
+
+      const u = (p.unit || '').trim();
+      if (u) unitSet.add(u);
+    }
+
+    const sortedBrands = Array.from(brandSet).sort((a, b) => a.localeCompare(b));
+    if (hasUnbranded) {
+      sortedBrands.push('Unbranded');
+    }
+
+    return {
+      brands: sortedBrands,
+      sizes: Array.from(sizeSet).sort((a, b) => a.localeCompare(b)),
+      units: Array.from(unitSet).sort((a, b) => a.localeCompare(b)),
+      totalActiveCount: products.length,
+    };
   }
 
   async create(data: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>): Promise<Product> {

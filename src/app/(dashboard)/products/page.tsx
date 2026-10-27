@@ -1,8 +1,9 @@
 // src/app/(dashboard)/products/page.tsx
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   Package,
   Plus,
@@ -16,6 +17,8 @@ import {
   Eye,
   Calculator,
   ArrowRight,
+  X,
+  RotateCcw,
 } from 'lucide-react';
 import {
   formatCurrency,
@@ -28,12 +31,48 @@ import { Product, CustomFieldDefinition } from '@/types';
 import { Modal, ConfirmModal } from '@/components/ui/modal';
 
 export default function ProductsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="py-16 text-center text-slate-500 font-medium">
+          Loading product catalogue...
+        </div>
+      }
+    >
+      <ProductsPageContent />
+    </Suspense>
+  );
+}
+
+function ProductsPageContent() {
+  const searchParams = useSearchParams();
+
   const [products, setProducts] = useState<Product[]>([]);
   const [customColumns, setCustomColumns] = useState<CustomFieldDefinition[]>([]);
   const [protectedFields, setProtectedFields] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterMode, setFilterMode] = useState<'all' | 'lowStock' | 'outOfStock'>('all');
+
+  // Active Multi-Criteria Filter State (Phase 2 requirement)
+  const [selectedBrand, setSelectedBrand] = useState('all');
+  const [selectedSize, setSelectedSize] = useState('all');
+  const [selectedUnit, setSelectedUnit] = useState('all');
+  const [stockStatus, setStockStatus] = useState<'all' | 'inStock' | 'lowStock' | 'outOfStock'>('all');
+
+  // Dynamic filter options from actual catalogue
+  const [filterOptions, setFilterOptions] = useState<{
+    brands: string[];
+    sizes: string[];
+    units: string[];
+  }>({ brands: [], sizes: [], units: [] });
+  const [loadingFilterOptions, setLoadingFilterOptions] = useState(false);
+
+  // Filter Modal Dialog State
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [draftBrand, setDraftBrand] = useState('all');
+  const [draftSize, setDraftSize] = useState('all');
+  const [draftUnit, setDraftUnit] = useState('all');
+  const [draftStatus, setDraftStatus] = useState<'all' | 'inStock' | 'lowStock' | 'outOfStock'>('all');
 
   // Modals state
   const [showAddRowConfirm, setShowAddRowConfirm] = useState(false);
@@ -80,14 +119,32 @@ export default function ProductsPage() {
   const [newColumnLabel, setNewColumnLabel] = useState('');
   const [newColumnType, setNewColumnType] = useState<'TEXT' | 'NUMBER' | 'DATE'>('TEXT');
 
+  // Read URL query parameters on mount (Phase 5: Low-Stock Navigation)
+  useEffect(() => {
+    const statusParam = searchParams.get('status');
+    if (statusParam === 'lowStock' || statusParam === 'outOfStock' || statusParam === 'inStock') {
+      setStockStatus(statusParam);
+    }
+    const brandParam = searchParams.get('brand');
+    if (brandParam) {
+      setSelectedBrand(brandParam);
+    }
+    const searchParam = searchParams.get('search');
+    if (searchParam) {
+      setSearch(searchParam);
+    }
+  }, [searchParams]);
+
   const fetchProducts = async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (search) params.set('search', search);
-      if (filterMode === 'lowStock') params.set('lowStock', 'true');
-      if (filterMode === 'outOfStock') params.set('outOfStock', 'true');
-      params.set('limit', '100');
+      if (search.trim()) params.set('search', search.trim());
+      if (selectedBrand && selectedBrand !== 'all') params.set('brand', selectedBrand);
+      if (selectedSize && selectedSize !== 'all') params.set('size', selectedSize);
+      if (selectedUnit && selectedUnit !== 'all') params.set('unit', selectedUnit);
+      if (stockStatus && stockStatus !== 'all') params.set('status', stockStatus);
+      params.set('limit', '500');
 
       const res = await fetch(`/api/products?${params.toString()}`);
       const data = await res.json();
@@ -96,6 +153,25 @@ export default function ProductsPage() {
       console.error('Error fetching products:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchFilterOptions = async () => {
+    setLoadingFilterOptions(true);
+    try {
+      const res = await fetch('/api/products/filters');
+      if (res.ok) {
+        const data = await res.json();
+        setFilterOptions({
+          brands: data.brands || [],
+          sizes: data.sizes || [],
+          units: data.units || [],
+        });
+      }
+    } catch (err) {
+      console.error('Error fetching filter options:', err);
+    } finally {
+      setLoadingFilterOptions(false);
     }
   };
 
@@ -112,16 +188,54 @@ export default function ProductsPage() {
 
   useEffect(() => {
     fetchProducts();
-  }, [filterMode]);
+  }, [selectedBrand, selectedSize, selectedUnit, stockStatus]);
 
   useEffect(() => {
     fetchColumns();
+    fetchFilterOptions();
   }, []);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     fetchProducts();
   };
+
+  // Open filter modal and initialize draft values
+  const handleOpenFilterModal = () => {
+    setDraftBrand(selectedBrand);
+    setDraftSize(selectedSize);
+    setDraftUnit(selectedUnit);
+    setDraftStatus(stockStatus);
+    setShowFilterModal(true);
+  };
+
+  // Apply filter modal
+  const handleApplyFilters = () => {
+    setSelectedBrand(draftBrand);
+    setSelectedSize(draftSize);
+    setSelectedUnit(draftUnit);
+    setStockStatus(draftStatus);
+    setShowFilterModal(false);
+  };
+
+  // Reset all filters
+  const handleClearAllFilters = () => {
+    setSelectedBrand('all');
+    setSelectedSize('all');
+    setSelectedUnit('all');
+    setStockStatus('all');
+    setSearch('');
+    setDraftBrand('all');
+    setDraftSize('all');
+    setDraftUnit('all');
+    setDraftStatus('all');
+  };
+
+  const activeFiltersCount =
+    (selectedBrand !== 'all' ? 1 : 0) +
+    (selectedSize !== 'all' ? 1 : 0) +
+    (selectedUnit !== 'all' ? 1 : 0) +
+    (stockStatus !== 'all' ? 1 : 0);
 
   // --- ADD ROW WORKFLOW ---
   const onConfirmAddRow = () => {
@@ -468,56 +582,165 @@ export default function ProductsPage() {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-        <form onSubmit={handleSearchSubmit} className="flex-1 relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by Product ID, Item Name, Brand, Size..."
-            className="w-full pl-10 pr-24 py-2 text-sm bg-white border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all shadow-xs text-slate-900"
-          />
-          <button
-            type="submit"
-            className="absolute right-1.5 top-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors"
-          >
-            Search
-          </button>
-        </form>
+      <div className="space-y-3">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+          {/* Search Box */}
+          <form onSubmit={handleSearchSubmit} className="flex-1 relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by Product ID, Item Name, Brand, Size..."
+              className="w-full pl-10 pr-24 py-2 text-sm bg-white border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all shadow-xs text-slate-900"
+            />
+            <button
+              type="submit"
+              className="absolute right-1.5 top-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors"
+            >
+              Search
+            </button>
+          </form>
 
-        <div className="inline-flex rounded-xl bg-slate-200/70 p-1 text-xs font-medium self-start sm:self-auto shrink-0 shadow-inner">
+          {/* Phase 2: Dedicated Filter Dialog Trigger Button */}
           <button
-            onClick={() => setFilterMode('all')}
-            className={`px-3 py-1.5 rounded-lg transition-all ${
-              filterMode === 'all'
-                ? 'bg-white text-blue-700 font-semibold shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
+            type="button"
+            onClick={handleOpenFilterModal}
+            className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl border transition-all shadow-2xs shrink-0 ${
+              activeFiltersCount > 0
+                ? 'bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100'
+                : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
             }`}
           >
-            All Products
+            <Filter className="w-4 h-4 text-[#3563e9]" />
+            <span>Filter</span>
+            {activeFiltersCount > 0 && (
+              <span className="w-4 h-4 rounded-full bg-[#3563e9] text-white text-[10px] font-bold flex items-center justify-center">
+                {activeFiltersCount}
+              </span>
+            )}
           </button>
-          <button
-            onClick={() => setFilterMode('lowStock')}
-            className={`px-3 py-1.5 rounded-lg transition-all ${
-              filterMode === 'lowStock'
-                ? 'bg-amber-100 text-amber-900 font-semibold shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Low Stock
-          </button>
-          <button
-            onClick={() => setFilterMode('outOfStock')}
-            className={`px-3 py-1.5 rounded-lg transition-all ${
-              filterMode === 'outOfStock'
-                ? 'bg-rose-100 text-rose-900 font-semibold shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Out of Stock
-          </button>
+
+          {/* Quick Stock Status Segmented Control */}
+          <div className="inline-flex rounded-xl bg-slate-200/70 p-1 text-xs font-medium self-start sm:self-auto shrink-0 shadow-inner">
+            <button
+              onClick={() => setStockStatus('all')}
+              className={`px-3 py-1.5 rounded-lg transition-all ${
+                stockStatus === 'all'
+                  ? 'bg-white text-blue-700 font-semibold shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              All Products
+            </button>
+            <button
+              onClick={() => setStockStatus('lowStock')}
+              className={`px-3 py-1.5 rounded-lg transition-all ${
+                stockStatus === 'lowStock'
+                  ? 'bg-amber-100 text-amber-900 font-semibold shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Low Stock
+            </button>
+            <button
+              onClick={() => setStockStatus('outOfStock')}
+              className={`px-3 py-1.5 rounded-lg transition-all ${
+                stockStatus === 'outOfStock'
+                  ? 'bg-rose-100 text-rose-900 font-semibold shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Out of Stock
+            </button>
+          </div>
         </div>
+
+        {/* Active Filter Chips & Result Counter */}
+        {(activeFiltersCount > 0 || search.trim()) && (
+          <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+            <span className="font-semibold text-slate-500">
+              Active Filters ({products.length} found):
+            </span>
+            {selectedBrand !== 'all' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 font-medium">
+                <span>Brand: <strong>{selectedBrand}</strong></span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedBrand('all')}
+                  className="hover:text-blue-900 p-0.5 rounded-full hover:bg-blue-100"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {selectedSize !== 'all' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-violet-50 text-violet-700 border border-violet-200 font-medium">
+                <span>Size: <strong>{selectedSize}</strong></span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSize('all')}
+                  className="hover:text-violet-900 p-0.5 rounded-full hover:bg-violet-100"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {selectedUnit !== 'all' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium">
+                <span>Unit: <strong>{selectedUnit}</strong></span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedUnit('all')}
+                  className="hover:text-indigo-900 p-0.5 rounded-full hover:bg-indigo-100"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {stockStatus !== 'all' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 font-medium">
+                <span>
+                  Status:{' '}
+                  <strong>
+                    {stockStatus === 'lowStock'
+                      ? 'Low Stock'
+                      : stockStatus === 'outOfStock'
+                      ? 'Out of Stock'
+                      : 'In Stock'}
+                  </strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setStockStatus('all')}
+                  className="hover:text-amber-950 p-0.5 rounded-full hover:bg-amber-100"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {search.trim() && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 font-medium">
+                <span>Search: "<strong>{search.trim()}</strong>"</span>
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="hover:text-slate-900 p-0.5 rounded-full hover:bg-slate-200"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={handleClearAllFilters}
+              className="inline-flex items-center gap-1 text-rose-600 hover:text-rose-700 font-semibold underline underline-offset-2 ml-1"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Clear All</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main Spreadsheet Product Table */}
@@ -570,8 +793,26 @@ export default function ProductsPage() {
                 </tr>
               ) : products.length === 0 ? (
                 <tr>
-                  <td colSpan={12 + customColumns.length} className="py-12 text-center text-slate-400">
-                    No products found matching your search.
+                  <td colSpan={12 + customColumns.length} className="py-12 text-center">
+                    <div className="flex flex-col items-center justify-center space-y-2">
+                      <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                        <Package className="w-5 h-5" />
+                      </div>
+                      <p className="text-sm font-semibold text-slate-700">No products match your criteria</p>
+                      <p className="text-xs text-slate-400 max-w-sm">
+                        Try adjusting your filters, selecting a different brand or stock status, or clearing the search term.
+                      </p>
+                      {(activeFiltersCount > 0 || search.trim()) && (
+                        <button
+                          type="button"
+                          onClick={handleClearAllFilters}
+                          className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Reset All Filters</span>
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : (
@@ -1179,6 +1420,120 @@ export default function ProductsPage() {
           </form>
         </Modal>
       )}
+
+      {/* Advanced Filter Modal (Phase 2 requirement) */}
+      <Modal
+        isOpen={showFilterModal}
+        onClose={() => setShowFilterModal(false)}
+        title="Filter Products"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500">
+            Apply multi-criteria filters across the entire product catalog. Filters combine with your search term using strict matching.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            {/* Brand Filter */}
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-700">Company / Brand</label>
+              <select
+                value={draftBrand}
+                onChange={(e) => setDraftBrand(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 font-medium text-slate-800"
+              >
+                <option value="all">All Brands</option>
+                {filterOptions.brands.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Stock Status Filter */}
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-700">Stock Status</label>
+              <select
+                value={draftStatus}
+                onChange={(e) =>
+                  setDraftStatus(e.target.value as 'all' | 'inStock' | 'lowStock' | 'outOfStock')
+                }
+                className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 font-medium text-slate-800"
+              >
+                <option value="all">All Stock Levels</option>
+                <option value="inStock">In Stock (&gt; Low Stock Limit)</option>
+                <option value="lowStock">Low Stock (≤ Limit &gt; 0)</option>
+                <option value="outOfStock">Out of Stock (≤ 0 units)</option>
+              </select>
+            </div>
+
+            {/* Size Filter */}
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-700">Size / Dimension</label>
+              <select
+                value={draftSize}
+                onChange={(e) => setDraftSize(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 font-medium text-slate-800"
+              >
+                <option value="all">All Sizes</option>
+                {filterOptions.sizes.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Unit Filter */}
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-700">Unit of Measure</label>
+              <select
+                value={draftUnit}
+                onChange={(e) => setDraftUnit(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 font-medium text-slate-800"
+              >
+                <option value="all">All Units</option>
+                {filterOptions.units.map((u) => (
+                  <option key={u} value={u}>
+                    {u}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => {
+                setDraftBrand('all');
+                setDraftSize('all');
+                setDraftUnit('all');
+                setDraftStatus('all');
+              }}
+              className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+            >
+              Reset Dialog
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowFilterModal(false)}
+                className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyFilters}
+                className="px-4 py-2 text-xs font-bold text-white bg-gradient-to-r from-[#3563e9] to-[#7656e8] hover:opacity-95 rounded-xl shadow-sm shadow-blue-500/25 transition-all"
+              >
+                Apply Filters
+              </button>
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
