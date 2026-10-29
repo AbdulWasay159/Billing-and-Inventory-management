@@ -154,7 +154,8 @@ const localStorageInstance: StorageService = new LocalStorageService();
 const gcsStorageInstance: StorageService = new GoogleCloudStorageService();
 
 export function getStorageService(): StorageService {
-  if (process.env.STORAGE_PROVIDER === 'gcs') {
+  const provider = (process.env.STORAGE_PROVIDER || process.env.STORAGE_BACKEND || '').toLowerCase();
+  if (provider === 'gcs') {
     return gcsStorageInstance;
   }
   return localStorageInstance;

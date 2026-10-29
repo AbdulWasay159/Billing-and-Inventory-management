@@ -218,6 +218,7 @@ model User {
   email        String   @unique
   passwordHash String   @map("password_hash")
   name         String
+  phone        String?
   role         String   @default("OWNER") // OWNER, ADMIN, STAFF
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")

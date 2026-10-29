@@ -37,8 +37,8 @@ export class AuthService {
         where: { email: cleanEmail },
       });
 
-      // Auto-bootstrap initial owner if users table is empty
-      if (!user) {
+      // Auto-bootstrap initial owner in development if users table is empty
+      if (!user && (process.env.NODE_ENV !== 'production' || process.env.ALLOW_AUTO_BOOTSTRAP === 'true')) {
         const userCount = await prisma.user.count();
         if (userCount === 0 && cleanEmail === 'owner@tradestock.com') {
           const defaultHash = await bcrypt.hash('password123', 10);
@@ -139,6 +139,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         name: user.name,
+        phone: (user as any).phone || undefined,
         role: user.role,
       };
     } else {
@@ -172,13 +173,14 @@ export class AuthService {
         where: { email: cleanEmail },
         data: {
           name: updates.name ? updates.name.trim() : undefined,
-        },
+          phone: updates.phone !== undefined ? updates.phone.trim() : undefined,
+        } as any,
       });
       return {
         id: user.id,
         email: user.email,
         name: user.name,
-        phone: updates.phone,
+        phone: (user as any).phone || undefined,
         role: user.role,
       };
     } else {

@@ -42,9 +42,8 @@ export class AnalyticsService {
     const { invoices } = await this.invoiceRepo.findMany({
       startDate,
       endDate,
-      limit: 10000,
     });
-    const { products } = await this.productRepo.findMany({ limit: 10000 });
+    const { products } = await this.productRepo.findMany({});
     const productMap = new Map<string, Product>();
     for (const p of products) {
       productMap.set(p.id, p);
@@ -129,21 +128,8 @@ export class AnalyticsService {
       totalSales += Number(inv.finalTotal) || 0;
       totalDiscounts += Number(inv.discountAmount) || 0;
 
-      // Returns refund calculation
-      if (inv.returns && inv.returns.length > 0) {
-        for (const ret of inv.returns) {
-          totalRefunds += Number(ret.totalReturnedAmount) || 0;
-        }
-      }
-
-      // Payment mode split (Phase 4.6 - Cash vs UPI split)
-      if (inv.paymentMode === 'UPI') {
-        upiSales += Number(inv.finalTotal) || 0;
-        upiCount++;
-      } else {
-        cashSales += Number(inv.finalTotal) || 0;
-        cashCount++;
-      }
+      // Track item-level purchase costs for return adjustments
+      const itemCostMap = new Map<string, number>();
 
       // Line items iteration
       for (const item of inv.items) {
@@ -163,6 +149,8 @@ export class AnalyticsService {
           costPerUnit = Number(p.purchasePrice);
           hasHistoricalCostAccuracy = false; // Flag that fallback was used
         }
+
+        itemCostMap.set(item.id, costPerUnit);
 
         const itemCogs = qty * costPerUnit;
         totalUnitsSold += qty;
@@ -215,6 +203,54 @@ export class AnalyticsService {
           pAgg.revenue += lineTotal;
           pAgg.cogs += itemCogs;
         }
+      }
+
+      // Returns refund and COGS reversal calculation
+      if (inv.returns && inv.returns.length > 0) {
+        for (const ret of inv.returns) {
+          totalRefunds += Number(ret.totalReturnedAmount) || 0;
+
+          if (ret.items && Array.isArray(ret.items)) {
+            for (const retItem of ret.items) {
+              const retQty = Number(retItem.quantity) || 0;
+              const unitCost = itemCostMap.get(retItem.invoiceItemId) || 0;
+              const returnedCogs = retQty * unitCost;
+
+              // Reverse COGS and units sold on returns
+              totalUnitsSold = Math.max(0, totalUnitsSold - retQty);
+              totalCOGS = Math.max(0, totalCOGS - returnedCogs);
+
+              const p = productMap.get(retItem.productId);
+              const rawBrand = (p?.companyBrand || '').trim();
+              const brandKey = rawBrand ? rawBrand : 'Unbranded';
+              const bEntry = brandMap.get(brandKey);
+              if (bEntry) {
+                bEntry.unitsSold = Math.max(0, bEntry.unitsSold - retQty);
+                bEntry.cogs = Math.max(0, bEntry.cogs - returnedCogs);
+                const bp = bEntry.productsMap.get(retItem.productId);
+                if (bp) {
+                  bp.unitsSold = Math.max(0, bp.unitsSold - retQty);
+                  bp.cogs = Math.max(0, bp.cogs - returnedCogs);
+                }
+              }
+
+              const pAgg = productSalesAgg.get(retItem.productId);
+              if (pAgg) {
+                pAgg.unitsSold = Math.max(0, pAgg.unitsSold - retQty);
+                pAgg.cogs = Math.max(0, pAgg.cogs - returnedCogs);
+              }
+            }
+          }
+        }
+      }
+
+      // Payment mode split (Phase 4.6 - Cash vs UPI split)
+      if (inv.paymentMode === 'UPI') {
+        upiSales += Number(inv.finalTotal) || 0;
+        upiCount++;
+      } else {
+        cashSales += Number(inv.finalTotal) || 0;
+        cashCount++;
       }
     }
 

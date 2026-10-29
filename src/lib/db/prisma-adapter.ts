@@ -187,20 +187,25 @@ export class PrismaProductRepository implements IProductRepository {
   }
 
   async findMany(filter?: ProductFilter): Promise<{ products: Product[]; totalCount: number }> {
-    const where: any = {};
+    const andConditions: any[] = [];
 
+    // Active status filter: default to true to match local-adapter behavior
     if (filter?.isActive !== undefined) {
-      where.isActive = filter.isActive;
+      andConditions.push({ isActive: filter.isActive });
+    } else {
+      andConditions.push({ isActive: true });
     }
 
     if (filter?.search) {
       const q = filter.search.trim();
-      where.OR = [
-        { name: { contains: q, mode: 'insensitive' } },
-        { productId: { contains: q, mode: 'insensitive' } },
-        { companyBrand: { contains: q, mode: 'insensitive' } },
-        { size: { contains: q, mode: 'insensitive' } },
-      ];
+      andConditions.push({
+        OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { productId: { contains: q, mode: 'insensitive' } },
+          { companyBrand: { contains: q, mode: 'insensitive' } },
+          { size: { contains: q, mode: 'insensitive' } },
+        ],
+      });
     }
 
     if (filter?.brand) {
@@ -210,27 +215,76 @@ export class PrismaProductRepository implements IProductRepository {
         targetBrand.toLowerCase() === '(no brand)' ||
         targetBrand === '__unbranded__'
       ) {
-        where.OR = [
-          { companyBrand: null },
-          { companyBrand: '' },
-        ];
+        andConditions.push({
+          OR: [{ companyBrand: null }, { companyBrand: '' }],
+        });
       } else {
-        where.companyBrand = { equals: targetBrand, mode: 'insensitive' };
+        andConditions.push({
+          companyBrand: { equals: targetBrand, mode: 'insensitive' },
+        });
       }
     }
 
     if (filter?.size) {
-      where.size = { equals: filter.size.trim(), mode: 'insensitive' };
+      andConditions.push({ size: { equals: filter.size.trim(), mode: 'insensitive' } });
     }
 
     if (filter?.unit) {
-      where.unit = { equals: filter.unit.trim(), mode: 'insensitive' };
+      andConditions.push({ unit: { equals: filter.unit.trim(), mode: 'insensitive' } });
     }
 
     if (filter?.stockStatus === 'outOfStock' || filter?.outOfStockOnly) {
-      where.stockQuantity = { lte: 0 };
+      andConditions.push({ stockQuantity: { lte: 0 } });
     }
 
+    const where = andConditions.length > 0 ? { AND: andConditions } : {};
+
+    const isLowStockFilter = filter?.stockStatus === 'lowStock' || filter?.lowStockOnly;
+    const isInStockFilter = filter?.stockStatus === 'inStock';
+
+    if (isLowStockFilter || isInStockFilter) {
+      // For column-to-column threshold comparisons (stockQuantity vs lowStockLimit):
+      // Fetch candidate lightweight records matching static filters, filter and paginate accurately
+      const candidates = await prisma.product.findMany({
+        where,
+        select: { id: true, stockQuantity: true, lowStockLimit: true },
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      const matchedIds = candidates
+        .filter((p) => {
+          const stock = Number(p.stockQuantity);
+          const limit = Number(p.lowStockLimit);
+          if (isLowStockFilter) {
+            return stock > 0 && stock <= limit;
+          }
+          return stock > limit;
+        })
+        .map((p) => p.id);
+
+      const totalCount = matchedIds.length;
+      const offset = filter?.offset ?? 0;
+      const limit = filter?.limit ?? 50;
+      const pageIds = matchedIds.slice(offset, offset + limit);
+
+      if (pageIds.length === 0) {
+        return { products: [], totalCount };
+      }
+
+      const products = await prisma.product.findMany({
+        where: { id: { in: pageIds } },
+        orderBy: { updatedAt: 'desc' },
+        include: {
+          customFieldValues: {
+            include: { fieldDefinition: true },
+          },
+        },
+      });
+
+      return { products: products.map(mapProduct), totalCount };
+    }
+
+    // Direct database pagination for standard filters
     const [products, totalCount] = await Promise.all([
       prisma.product.findMany({
         where,
@@ -246,15 +300,7 @@ export class PrismaProductRepository implements IProductRepository {
       prisma.product.count({ where }),
     ]);
 
-    let mapped = products.map(mapProduct);
-
-    if (filter?.stockStatus === 'lowStock' || filter?.lowStockOnly) {
-      mapped = mapped.filter((p) => p.stockQuantity > 0 && p.stockQuantity <= p.lowStockLimit);
-    } else if (filter?.stockStatus === 'inStock') {
-      mapped = mapped.filter((p) => p.stockQuantity > p.lowStockLimit);
-    }
-
-    return { products: mapped, totalCount };
+    return { products: products.map(mapProduct), totalCount };
   }
 
   async getDistinctFilterOptions(): Promise<{
@@ -461,6 +507,15 @@ export class PrismaStockRepository implements IStockRepository {
     referenceId?: string,
     notes?: string
   ): Promise<{ newStock: number; transaction: StockTransaction }> {
+    if (typeof quantityChange !== 'number' || !isFinite(quantityChange)) {
+      throw new Error(`Invalid stock quantity adjustment: value must be a finite number.`);
+    }
+
+    const ALLOWED_TYPES = ['STOCK_RECEIVED', 'SALE', 'RETURN', 'ADJUSTMENT', 'IMPORT_SET'];
+    if (!ALLOWED_TYPES.includes(transactionType)) {
+      throw new Error(`Invalid transaction type: "${transactionType}".`);
+    }
+
     return prisma.$transaction(async (tx) => {
       const product = await tx.product.findUnique({
         where: { id: productId },
@@ -470,18 +525,34 @@ export class PrismaStockRepository implements IStockRepository {
       }
 
       const stockBefore = Number(product.stockQuantity);
-      const stockAfter = Math.round((stockBefore + quantityChange) * 1000) / 1000;
+      const absChange = Math.abs(quantityChange);
 
-      if (stockAfter < 0) {
-        throw new Error(
-          `Insufficient stock for "${product.name}". Available: ${stockBefore}, Requested deduction: ${Math.abs(quantityChange)}`
-        );
+      if (quantityChange < 0) {
+        // Atomic conditional decrement to eliminate race conditions under concurrency
+        const updateResult = await tx.product.updateMany({
+          where: {
+            id: productId,
+            stockQuantity: { gte: absChange },
+          },
+          data: {
+            stockQuantity: { decrement: absChange },
+          },
+        });
+
+        if (updateResult.count === 0) {
+          throw new Error(
+            `Insufficient stock for "${product.name}". Available: ${stockBefore}, Requested deduction: ${absChange}`
+          );
+        }
+      } else if (quantityChange > 0) {
+        await tx.product.update({
+          where: { id: productId },
+          data: { stockQuantity: { increment: quantityChange } },
+        });
       }
 
-      await tx.product.update({
-        where: { id: productId },
-        data: { stockQuantity: stockAfter },
-      });
+      const reloaded = await tx.product.findUnique({ where: { id: productId } });
+      const stockAfter = Number(reloaded?.stockQuantity ?? stockBefore);
 
       const transaction = await tx.stockTransaction.create({
         data: {

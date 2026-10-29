@@ -77,6 +77,7 @@ export default function BillingPage() {
   }, [searchQuery]);
 
   const addItemToBill = (product: Product) => {
+    if (!product || !product.id) return;
     if (product.stockQuantity <= 0) {
       alert(`Cannot add "${product.name}". Product is currently out of stock.`);
       return;
@@ -262,6 +263,14 @@ export default function BillingPage() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (searchResults.length > 0) {
+                      addItemToBill(searchResults[0]);
+                    }
+                  }
+                }}
                 placeholder="Scan or type Product ID (e.g. HW-0001) or Product Name..."
                 className="w-full pl-11 pr-4 py-3 text-sm bg-white border border-slate-200 rounded-2xl shadow-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all text-slate-900"
               />

@@ -13,7 +13,64 @@ export class ImportExportService {
     return parseAndValidateImportBuffer(fileBuffer, this.productRepo);
   }
 
+  private validateRowsBeforeCommit(rows: ImportPreviewRow[]): void {
+    if (!rows || !Array.isArray(rows) || rows.length === 0) {
+      throw new Error('No validated rows provided to commit.');
+    }
+    if (rows.length > 5000) {
+      throw new Error(`Batch size exceeds maximum limit of 5,000 rows (got ${rows.length}).`);
+    }
+
+    const seenIds = new Set<string>();
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNum = row.rowNumber || i + 2;
+
+      if (!row.name || !row.name.trim()) {
+        throw new Error(`Validation Error on Row ${rowNum}: Product Name is required.`);
+      }
+
+      const pId = (row.productId || '').trim().toUpperCase();
+      if (!pId) {
+        throw new Error(`Validation Error on Row ${rowNum}: Product ID is required.`);
+      }
+
+      if (seenIds.has(pId)) {
+        throw new Error(`Validation Error on Row ${rowNum}: Duplicate Product ID "${pId}" within upload batch.`);
+      }
+      seenIds.add(pId);
+
+      const targetStock = Number(row.targetStock);
+      if (isNaN(targetStock) || !isFinite(targetStock) || targetStock < 0) {
+        throw new Error(
+          `Validation Error on Row ${rowNum} (${pId}): Stock Quantity must be a valid non-negative number.`
+        );
+      }
+
+      const mrp = Number(row.mrp);
+      if (isNaN(mrp) || !isFinite(mrp) || mrp < 0) {
+        throw new Error(`Validation Error on Row ${rowNum} (${pId}): MRP must be a valid non-negative number.`);
+      }
+
+      const disc = Number(row.purchaseDiscountPercent);
+      if (isNaN(disc) || !isFinite(disc) || disc < 0 || disc > 100) {
+        throw new Error(
+          `Validation Error on Row ${rowNum} (${pId}): Purchase Discount % must be between 0 and 100.`
+        );
+      }
+
+      const sp = Number(row.sellingPrice);
+      if (isNaN(sp) || !isFinite(sp) || sp < 0) {
+        throw new Error(
+          `Validation Error on Row ${rowNum} (${pId}): Selling Price must be a valid non-negative number.`
+        );
+      }
+    }
+  }
+
   async commitImport(validatedRows: ImportPreviewRow[]): Promise<ImportSummary> {
+    this.validateRowsBeforeCommit(validatedRows);
+
     if (isPrismaConfigured()) {
       return prisma.$transaction(
         async (tx) => {
@@ -208,7 +265,7 @@ export class ImportExportService {
   }
 
   async exportProducts(format: 'xlsx' | 'csv' = 'xlsx', brand?: string): Promise<{ data: any; filename: string }> {
-    const filter: any = { limit: 10000 };
+    const filter: any = {};
     if (brand && brand !== 'all') {
       filter.brand = brand;
     }

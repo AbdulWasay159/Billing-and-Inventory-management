@@ -6,8 +6,9 @@ import { useRouter } from 'next/navigation';
 import { Store, Lock, Mail, ArrowRight, AlertCircle } from 'lucide-react';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('owner@tradestock.com');
-  const [password, setPassword] = useState('password123');
+  const isDev = process.env.NODE_ENV !== 'production';
+  const [email, setEmail] = useState(isDev ? 'owner@tradestock.com' : '');
+  const [password, setPassword] = useState(isDev ? 'password123' : '');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -109,11 +110,13 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-6 pt-5 border-t border-slate-100 text-center">
-            <p className="text-xs text-slate-500">
-              Default Credentials: <code className="text-[#3563e9] bg-[#3563e9]/10 px-2 py-0.5 rounded-md font-mono font-medium border border-[#3563e9]/20">owner@tradestock.com</code> / <code className="text-[#3563e9] bg-[#3563e9]/10 px-2 py-0.5 rounded-md font-mono font-medium border border-[#3563e9]/20">password123</code>
-            </p>
-          </div>
+          {isDev && (
+            <div className="mt-6 pt-5 border-t border-slate-100 text-center">
+              <p className="text-xs text-slate-500">
+                Development Credentials: <code className="text-[#3563e9] bg-[#3563e9]/10 px-2 py-0.5 rounded-md font-mono font-medium border border-[#3563e9]/20">owner@tradestock.com</code> / <code className="text-[#3563e9] bg-[#3563e9]/10 px-2 py-0.5 rounded-md font-mono font-medium border border-[#3563e9]/20">password123</code>
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>

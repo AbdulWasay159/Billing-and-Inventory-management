@@ -48,6 +48,16 @@ export class ReturnService {
           }
         }
 
+        const invSubtotal = Number(invoice.subtotal) || 0;
+        const invDiscount = Number(invoice.discountAmount) || 0;
+        const discountRatio = invSubtotal > 0 ? Math.min(1, invDiscount / invSubtotal) : 0;
+
+        const alreadyRefundedTotal = existingReturns.reduce(
+          (sum, r) => sum + (Number(r.totalReturnedAmount) || 0),
+          0
+        );
+        const maxRemainingRefund = Math.max(0, Math.round((Number(invoice.finalTotal) - alreadyRefundedTotal) * 100) / 100);
+
         const returnItemsData: {
           invoiceItemId: string;
           productId: string;
@@ -60,7 +70,7 @@ export class ReturnService {
         let totalRefund = 0;
 
         for (const reqItem of input.items) {
-          if (reqItem.quantity <= 0) continue;
+          if (!reqItem.quantity || reqItem.quantity <= 0 || !isFinite(reqItem.quantity)) continue;
 
           const origItem = invoice.items.find((it) => it.id === reqItem.invoiceItemId);
           if (!origItem) throw new Error('Invoice item not found.');
@@ -76,7 +86,9 @@ export class ReturnService {
 
           alreadyReturnedMap.set(origItem.id, alreadyReturned + reqItem.quantity);
 
-          const refundAmount = Math.round(Number(origItem.sellingPriceSnapshot) * reqItem.quantity * 100) / 100;
+          // Proportional net refund accounting for invoice-level discounts
+          const netUnitPrice = Math.round(Number(origItem.sellingPriceSnapshot) * (1 - discountRatio) * 100) / 100;
+          const refundAmount = Math.round(netUnitPrice * reqItem.quantity * 100) / 100;
           totalRefund += refundAmount;
 
           returnItemsData.push({
@@ -91,6 +103,11 @@ export class ReturnService {
 
         if (returnItemsData.length === 0) {
           throw new Error('Please select at least one item with a valid return quantity.');
+        }
+
+        // Cap cumulative refunds strictly at total amount paid on the invoice
+        if (totalRefund > maxRemainingRefund) {
+          totalRefund = maxRemainingRefund;
         }
 
         // Atomic Sequence counter for return number
@@ -168,6 +185,16 @@ export class ReturnService {
       }
     }
 
+    const invSubtotal = Number(invoice.subtotal) || 0;
+    const invDiscount = Number(invoice.discountAmount) || 0;
+    const discountRatio = invSubtotal > 0 ? Math.min(1, invDiscount / invSubtotal) : 0;
+
+    const alreadyRefundedTotal = existingReturns.reduce(
+      (sum, r) => sum + (Number(r.totalReturnedAmount) || 0),
+      0
+    );
+    const maxRemainingRefund = Math.max(0, Math.round((Number(invoice.finalTotal) - alreadyRefundedTotal) * 100) / 100);
+
     const returnItemsData: {
       invoiceItemId: string;
       productId: string;
@@ -175,8 +202,10 @@ export class ReturnService {
       refundAmount: number;
     }[] = [];
 
+    let totalRefund = 0;
+
     for (const reqItem of input.items) {
-      if (reqItem.quantity <= 0) continue;
+      if (!reqItem.quantity || reqItem.quantity <= 0 || !isFinite(reqItem.quantity)) continue;
 
       const origItem = invoice.items.find((it) => it.id === reqItem.invoiceItemId);
       if (!origItem) throw new Error('Invoice item not found.');
@@ -192,7 +221,10 @@ export class ReturnService {
 
       alreadyReturnedMap.set(origItem.id, alreadyReturned + reqItem.quantity);
 
-      const refundAmount = Math.round(Number(origItem.sellingPriceSnapshot) * reqItem.quantity * 100) / 100;
+      // Proportional net refund accounting for invoice-level discounts
+      const netUnitPrice = Math.round(Number(origItem.sellingPriceSnapshot) * (1 - discountRatio) * 100) / 100;
+      const refundAmount = Math.round(netUnitPrice * reqItem.quantity * 100) / 100;
+      totalRefund += refundAmount;
 
       returnItemsData.push({
         invoiceItemId: origItem.id,
@@ -206,6 +238,10 @@ export class ReturnService {
       throw new Error('Please select at least one item with a valid return quantity.');
     }
 
+    if (totalRefund > maxRemainingRefund) {
+      totalRefund = maxRemainingRefund;
+    }
+
     // Step 1: Create return record
     const invoiceReturn = await this.returnRepo.createReturn(
       input.invoiceId,
@@ -213,15 +249,33 @@ export class ReturnService {
       input.reason
     );
 
-    // Step 2: Atomically restore stock for returned items
-    for (const item of returnItemsData) {
-      await this.stockRepo.updateStockAtomically(
-        item.productId,
-        item.quantity, // Positive to restore stock
-        'RETURN',
-        invoiceReturn.id,
-        `Return ${invoiceReturn.returnNumber} for Invoice ${invoice.invoiceNumber}`
-      );
+    // Step 2: Atomically restore stock for returned items with rollback guard
+    const restoredItems: { productId: string; quantity: number }[] = [];
+    try {
+      for (const item of returnItemsData) {
+        await this.stockRepo.updateStockAtomically(
+          item.productId,
+          item.quantity, // Positive to restore stock
+          'RETURN',
+          invoiceReturn.id,
+          `Return ${invoiceReturn.returnNumber} for Invoice ${invoice.invoiceNumber}`
+        );
+        restoredItems.push({ productId: item.productId, quantity: item.quantity });
+      }
+    } catch (restoreErr) {
+      // Revert restored stock items on failure
+      for (const r of restoredItems) {
+        try {
+          await this.stockRepo.updateStockAtomically(
+            r.productId,
+            -r.quantity,
+            'ADJUSTMENT',
+            invoiceReturn.id,
+            `Rollback failed return ${invoiceReturn.returnNumber}`
+          );
+        } catch {}
+      }
+      throw restoreErr;
     }
 
     return invoiceReturn;

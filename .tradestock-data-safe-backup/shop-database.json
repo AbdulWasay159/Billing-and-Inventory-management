@@ -1,0 +1,53 @@
+{
+  "profile": {
+    "id": "shop_001",
+    "slug": "tradestock-demo-shop",
+    "name": "Arsh Trading",
+    "email": "owner@tradestock.com",
+    "phone": "+91 98765 43210",
+    "address": "Shop No. 12, Market Yard, Hardware Lane, Hyderabad, India",
+    "currencySymbol": "₹",
+    "receiptFooterMessage": "Goods once sold cannot be taken back without original bill. Thank you!",
+    "createdAt": "2026-09-29T11:40:51.623Z"
+  },
+  "products": [],
+  "priceHistory": [],
+  "stockTransactions": [],
+  "invoices": [],
+  "invoiceReturns": [],
+  "customFieldDefinitions": [
+    {
+      "id": "cf-rack",
+      "fieldKey": "rack_location",
+      "label": "Rack / Shelf No",
+      "dataType": "TEXT",
+      "isRequired": false,
+      "displayOrder": 1,
+      "createdAt": "2026-09-29T11:40:51.627Z"
+    },
+    {
+      "id": "cf-hsn",
+      "fieldKey": "supplier_code",
+      "label": "Distributor Item Code",
+      "dataType": "TEXT",
+      "isRequired": false,
+      "displayOrder": 2,
+      "createdAt": "2026-09-29T11:40:51.627Z"
+    }
+  ],
+  "customFieldValues": {},
+  "lastInvoiceSequence": 1063,
+  "users": [
+    {
+      "id": "user_owner_001",
+      "email": "owner@tradestock.com",
+      "passwordHash": "$2b$10$6Lg3Z7TOvrd2UKEXIVW/h.rKn8qEverihvRQ/Y8Ntsi7Mr8QAGhfC",
+      "name": "ARSH TRADING",
+      "role": "OWNER",
+      "phone": "+91 98765 43210",
+      "isActive": true,
+      "createdAt": "2026-10-14T04:00:01.178Z",
+      "updatedAt": "2026-10-18T12:18:21.935Z"
+    }
+  ]
+}

@@ -2,7 +2,19 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { jwtVerify } from 'jose';
 
-const SECRET_KEY = process.env.SESSION_SECRET || 'tradestock-pro-super-secure-production-secret-key-32-chars-min';
+const isProduction = process.env.NODE_ENV === 'production';
+const rawSecret = process.env.SESSION_SECRET;
+
+if (isProduction && (!rawSecret || rawSecret.trim().length < 32 || rawSecret.includes('super-secure-production-secret-key'))) {
+  throw new Error(
+    'FATAL SECURITY CONFIGURATION: A cryptographically random SESSION_SECRET of at least 32 characters must be configured in production environments.'
+  );
+}
+
+const SECRET_KEY = rawSecret && rawSecret.trim().length >= 32
+  ? rawSecret
+  : 'tradestock-pro-dev-fallback-secret-key-minimum-32-chars';
+
 const key = new TextEncoder().encode(SECRET_KEY);
 
 export async function middleware(request: NextRequest) {

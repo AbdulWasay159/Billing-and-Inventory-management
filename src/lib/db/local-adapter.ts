@@ -324,7 +324,24 @@ export class LocalDatabaseManager {
       }
       if (fs.existsSync(DB_FILE)) {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
-        this.data = JSON.parse(raw);
+        try {
+          this.data = JSON.parse(raw);
+        } catch (parseErr) {
+          // Forensic safety: Preserve corrupt file immediately for data recovery
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+          const corruptBackup = path.join(DATA_DIR, `shop-database.corrupt-${timestamp}.json`);
+          try {
+            fs.copyFileSync(DB_FILE, corruptBackup);
+            console.error(`[CRITICAL DATA SAFETY] Corrupt database file preserved to: ${corruptBackup}`);
+          } catch (copyErr) {
+            console.error('[CRITICAL] Failed to copy corrupt file:', copyErr);
+          }
+          // NEVER silently reset to empty data! Throw so operator can recover real business records
+          throw new Error(
+            `FATAL: Corrupt local database at ${DB_FILE}. Parse failed: ${(parseErr as Error).message}. Preserved recovery copy at ${corruptBackup}. Refusing to overwrite real data with initial template.`
+          );
+        }
+
         if (!this.data.users || this.data.users.length === 0) {
           this.data.users = getInitialData().users;
           this.save();
@@ -334,19 +351,33 @@ export class LocalDatabaseManager {
       }
       this.isLoaded = true;
     } catch (err) {
-      console.error('Error loading local database:', err);
+      if (fs.existsSync(DB_FILE)) {
+        // If file exists and failed, rethrow critical error
+        throw err;
+      }
+      console.error('Error initializing local database:', err);
       this.data = getInitialData();
     }
   }
 
   private save(): void {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const tempFile = path.join(
+      DATA_DIR,
+      `shop-database.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 7)}.json`
+    );
     try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-      }
-      fs.writeFileSync(DB_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
+      const content = JSON.stringify(this.data, null, 2);
+      fs.writeFileSync(tempFile, content, 'utf-8');
+      fs.renameSync(tempFile, DB_FILE);
     } catch (err) {
+      try {
+        if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+      } catch {}
       console.error('Error saving local database:', err);
+      throw new Error(`Persistence failure: Unable to write to ${DB_FILE}: ${(err as Error).message}`);
     }
   }
 
@@ -637,10 +668,19 @@ export class LocalStockRepository implements IStockRepository {
     const stockBefore = product.stockQuantity;
     const stockAfter = Math.round((stockBefore + quantityChange) * 1000) / 1000;
 
-    // Concurrency / overselling protection: prevent negative stock on SALE
-    if (transactionType === 'SALE' && stockAfter < 0) {
+    if (typeof quantityChange !== 'number' || !isFinite(quantityChange)) {
+      throw new Error(`Invalid stock quantity adjustment: value must be a finite number.`);
+    }
+
+    const ALLOWED_TYPES = ['STOCK_RECEIVED', 'SALE', 'RETURN', 'ADJUSTMENT', 'IMPORT_SET'];
+    if (!ALLOWED_TYPES.includes(transactionType)) {
+      throw new Error(`Invalid transaction type: "${transactionType}".`);
+    }
+
+    // Negative stock protection: prevent negative stock across all deductions
+    if (stockAfter < 0) {
       throw new Error(
-        `Insufficient stock for "${product.name}". Available: ${stockBefore}, Requested: ${Math.abs(
+        `Insufficient stock for "${product.name}". Available: ${stockBefore}, Requested deduction: ${Math.abs(
           quantityChange
         )}`
       );

@@ -57,13 +57,18 @@ export class BillingService {
         let subtotal = 0;
 
         for (const itemInput of input.items) {
-          if (itemInput.quantity <= 0) {
-            throw new Error('Quantity must be greater than zero for all items.');
+          if (itemInput.quantity <= 0 || !isFinite(itemInput.quantity)) {
+            throw new Error('Quantity must be a positive finite number for all items.');
           }
 
-          const product = await tx.product.findUnique({
+          let product = await tx.product.findUnique({
             where: { id: itemInput.productId },
           });
+          if (!product) {
+            product = await tx.product.findUnique({
+              where: { productId: itemInput.productId.trim().toUpperCase() },
+            });
+          }
           if (!product) {
             throw new Error(`Product not found.`);
           }
@@ -75,15 +80,27 @@ export class BillingService {
             );
           }
 
-          const stockAfter = Math.round((stockBefore - itemInput.quantity) * 1000) / 1000;
           const lineTotal = Math.round(Number(product.sellingPrice) * Number(itemInput.quantity) * 100) / 100;
           subtotal += lineTotal;
 
-          // Deduct stock atomically within transaction
-          await tx.product.update({
-            where: { id: product.id },
-            data: { stockQuantity: stockAfter },
+          // Deduct stock atomically within transaction using conditional update to eliminate race conditions
+          const updateResult = await tx.product.updateMany({
+            where: {
+              id: product.id,
+              stockQuantity: { gte: itemInput.quantity },
+            },
+            data: {
+              stockQuantity: { decrement: itemInput.quantity },
+            },
           });
+
+          if (updateResult.count === 0) {
+            throw new Error(
+              `Insufficient stock for "${product.name}" (${product.productId}). Available: ${stockBefore}, Requested: ${itemInput.quantity}`
+            );
+          }
+
+          const stockAfter = Math.round((stockBefore - itemInput.quantity) * 1000) / 1000;
 
           validatedItems.push({
             productId: product.id,
@@ -100,8 +117,17 @@ export class BillingService {
           });
         }
 
-        const discountAmount = Math.max(0, Number(input.discountAmount) || 0);
-        const finalTotal = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
+        const rawDiscount = Number(input.discountAmount ?? 0);
+        if (isNaN(rawDiscount) || !isFinite(rawDiscount) || rawDiscount < 0) {
+          throw new Error('Discount amount must be a valid non-negative number.');
+        }
+        if (rawDiscount > subtotal) {
+          throw new Error(
+            `Discount amount (₹${rawDiscount.toFixed(2)}) cannot exceed the invoice subtotal (₹${subtotal.toFixed(2)}).`
+          );
+        }
+        const discountAmount = Math.round(rawDiscount * 100) / 100;
+        const finalTotal = Math.round((subtotal - discountAmount) * 100) / 100;
 
         // Atomic sequential invoice number
         const counter = await tx.sequenceCounter.upsert({
@@ -171,11 +197,14 @@ export class BillingService {
     let subtotal = 0;
 
     for (const itemInput of input.items) {
-      if (itemInput.quantity <= 0) {
-        throw new Error('Quantity must be greater than zero for all items.');
+      if (itemInput.quantity <= 0 || !isFinite(itemInput.quantity)) {
+        throw new Error('Quantity must be a positive finite number for all items.');
       }
 
-      const product = await this.productRepo.findById(itemInput.productId);
+      let product = await this.productRepo.findById(itemInput.productId);
+      if (!product) {
+        product = await this.productRepo.findByProductId(itemInput.productId);
+      }
       if (!product) {
         throw new Error(`Product not found.`);
       }
@@ -202,8 +231,17 @@ export class BillingService {
       });
     }
 
-    const discountAmount = Math.max(0, Number(input.discountAmount) || 0);
-    const finalTotal = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
+    const rawDiscount = Number(input.discountAmount ?? 0);
+    if (isNaN(rawDiscount) || !isFinite(rawDiscount) || rawDiscount < 0) {
+      throw new Error('Discount amount must be a valid non-negative number.');
+    }
+    if (rawDiscount > subtotal) {
+      throw new Error(
+        `Discount amount (₹${rawDiscount.toFixed(2)}) cannot exceed the invoice subtotal (₹${subtotal.toFixed(2)}).`
+      );
+    }
+    const discountAmount = Math.round(rawDiscount * 100) / 100;
+    const finalTotal = Math.round((subtotal - discountAmount) * 100) / 100;
 
     const invoiceNumber = await this.invoiceRepo.generateNextInvoiceNumber();
 
@@ -223,15 +261,44 @@ export class BillingService {
       validatedItems
     );
 
-    // Atomically deduct stock and log SALE transactions
-    for (const item of validatedItems) {
-      await this.stockRepo.updateStockAtomically(
-        item.productId,
-        -item.quantity,
-        'SALE',
-        invoice.id,
-        `Invoice ${invoice.invoiceNumber}`
-      );
+    // Atomically deduct stock with rollback guard on persistence failure
+    const deductedItems: { productId: string; quantity: number }[] = [];
+    try {
+      for (const item of validatedItems) {
+        await this.stockRepo.updateStockAtomically(
+          item.productId,
+          -item.quantity,
+          'SALE',
+          invoice.id,
+          `Invoice ${invoice.invoiceNumber}`
+        );
+        deductedItems.push({ productId: item.productId, quantity: item.quantity });
+      }
+    } catch (stockErr) {
+      // Revert already deducted stock items
+      for (const d of deductedItems) {
+        try {
+          await this.stockRepo.updateStockAtomically(
+            d.productId,
+            d.quantity,
+            'ADJUSTMENT',
+            invoice.id,
+            `Rollback failed invoice ${invoice.invoiceNumber}`
+          );
+        } catch {}
+      }
+      // Remove partial invoice from local database
+      try {
+        const { LocalDatabaseManager } = await import('@/lib/db/local-adapter');
+        const db = LocalDatabaseManager.getInstance();
+        const invoices = db.getData().invoices;
+        const idx = invoices.findIndex((i) => i.id === invoice.id);
+        if (idx !== -1) {
+          invoices.splice(idx, 1);
+          db.persist();
+        }
+      } catch {}
+      throw stockErr;
     }
 
     return invoice;
@@ -349,8 +416,17 @@ export class BillingService {
           });
         }
 
-        const discountAmount = input.discountAmount !== undefined ? input.discountAmount : Number(originalInvoice.discountAmount);
-        const finalTotal = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
+        const rawDiscount = input.discountAmount !== undefined ? Number(input.discountAmount) : Number(originalInvoice.discountAmount);
+        if (isNaN(rawDiscount) || !isFinite(rawDiscount) || rawDiscount < 0) {
+          throw new Error('Discount amount must be a valid non-negative number.');
+        }
+        if (rawDiscount > subtotal) {
+          throw new Error(
+            `Discount amount (₹${rawDiscount.toFixed(2)}) cannot exceed the invoice subtotal (₹${subtotal.toFixed(2)}).`
+          );
+        }
+        const discountAmount = Math.round(rawDiscount * 100) / 100;
+        const finalTotal = Math.round((subtotal - discountAmount) * 100) / 100;
 
         // Apply inventory corrections & transaction logs inside transaction
         for (const prodId of allProductIds) {
@@ -499,8 +575,17 @@ export class BillingService {
       });
     }
 
-    const discountAmount = input.discountAmount !== undefined ? input.discountAmount : originalInvoice.discountAmount;
-    const finalTotal = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
+    const rawDiscount = input.discountAmount !== undefined ? Number(input.discountAmount) : Number(originalInvoice.discountAmount);
+    if (isNaN(rawDiscount) || !isFinite(rawDiscount) || rawDiscount < 0) {
+      throw new Error('Discount amount must be a valid non-negative number.');
+    }
+    if (rawDiscount > subtotal) {
+      throw new Error(
+        `Discount amount (₹${rawDiscount.toFixed(2)}) cannot exceed the invoice subtotal (₹${subtotal.toFixed(2)}).`
+      );
+    }
+    const discountAmount = Math.round(rawDiscount * 100) / 100;
+    const finalTotal = Math.round((subtotal - discountAmount) * 100) / 100;
 
     // Apply inventory corrections
     for (const prodId of allProductIds) {

@@ -40,7 +40,7 @@ export function exportProductsToWorkbook(products: Product[]): XLSX.WorkBook {
   products.forEach((p, idx) => {
     const r = idx + 2;
 
-    // Purchase Price Formula: =ROUND(H{r}*(1-I{r}/100),2)
+    // Purchase Price Formula: =ROUND(H{r}*(1-I{r}/100),2) with preserved initial numeric value
     worksheet['J' + r] = {
       t: 'n',
       v: Number(p.purchasePrice) || 0,

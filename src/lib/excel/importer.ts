@@ -68,6 +68,7 @@ export async function parseAndValidateImportBuffer(
 
     const size = (row['Size'] || row['size'] || row['Dimension'] || '').toString().trim();
     const companyBrand = (
+      row['Company / Brand'] ||
       row['Company'] ||
       row['Brand'] ||
       row['company_brand'] ||

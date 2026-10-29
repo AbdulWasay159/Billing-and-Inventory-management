@@ -51,19 +51,51 @@ export class ProductService {
     sellingPrice: number;
     customFields?: Record<string, string>;
   }): Promise<Product> {
+    if (!data.name || !data.name.trim()) {
+      throw new Error('Product name is required.');
+    }
+    if (!data.productId || !data.productId.trim()) {
+      throw new Error('Product ID is required.');
+    }
+
+    const mrp = Number(data.mrp);
+    if (isNaN(mrp) || !isFinite(mrp) || mrp < 0) {
+      throw new Error('MRP must be a valid non-negative number.');
+    }
+
+    const discountPercent = Number(data.purchaseDiscountPercent);
+    if (isNaN(discountPercent) || !isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
+      throw new Error('Purchase discount percentage must be between 0 and 100.');
+    }
+
+    const sellingPrice = Number(data.sellingPrice);
+    if (isNaN(sellingPrice) || !isFinite(sellingPrice) || sellingPrice < 0) {
+      throw new Error('Selling price must be a valid non-negative number.');
+    }
+
+    const stockQuantity = Number(data.stockQuantity);
+    if (isNaN(stockQuantity) || !isFinite(stockQuantity) || stockQuantity < 0) {
+      throw new Error('Stock quantity must be a valid non-negative number.');
+    }
+
+    const lowStockLimit = data.lowStockLimit !== undefined ? Number(data.lowStockLimit) : 5;
+    if (isNaN(lowStockLimit) || !isFinite(lowStockLimit) || lowStockLimit < 0) {
+      throw new Error('Low stock limit must be a valid non-negative number.');
+    }
+
     const cleanProductId = data.productId.trim().toUpperCase();
     const existing = await this.productRepo.findByProductId(cleanProductId);
     if (existing) {
       throw new Error(`Product ID "${cleanProductId}" is already in use.`);
     }
 
-    const calculatedCost = calculatePurchasePrice(data.mrp, data.purchaseDiscountPercent);
+    const calculatedCost = calculatePurchasePrice(mrp, discountPercent);
     const purchasePrice =
-      data.customPurchasePrice !== undefined && data.customPurchasePrice >= 0
+      data.customPurchasePrice !== undefined && isFinite(data.customPurchasePrice) && data.customPurchasePrice >= 0
         ? data.customPurchasePrice
         : calculatedCost;
 
-    const { profitMarginPercent } = calculateProfitMargin(purchasePrice, data.sellingPrice);
+    const { profitMarginPercent } = calculateProfitMargin(purchasePrice, sellingPrice);
 
     const product = await this.productRepo.create({
       productId: cleanProductId,
@@ -71,13 +103,13 @@ export class ProductService {
       size: data.size?.trim() || '',
       companyBrand: data.companyBrand?.trim() || '',
       unit: data.unit?.trim() || 'Pcs',
-      stockQuantity: Number(data.stockQuantity) || 0,
-      lowStockLimit: Number(data.lowStockLimit) >= 0 ? Number(data.lowStockLimit) : 5,
-      mrp: Number(data.mrp) || 0,
-      purchaseDiscountPercent: Number(data.purchaseDiscountPercent) || 0,
+      stockQuantity,
+      lowStockLimit,
+      mrp,
+      purchaseDiscountPercent: discountPercent,
       purchasePrice,
       profitMarginPercent,
-      sellingPrice: Number(data.sellingPrice) || 0,
+      sellingPrice,
       previousSellingPrice: null,
       isActive: true,
     });
@@ -107,6 +139,23 @@ export class ProductService {
     const existing = await this.productRepo.findById(id);
     if (!existing) throw new Error('Product not found.');
 
+    if (data.mrp !== undefined) {
+      const v = Number(data.mrp);
+      if (isNaN(v) || !isFinite(v) || v < 0) throw new Error('MRP must be a valid non-negative number.');
+    }
+    if (data.purchaseDiscountPercent !== undefined) {
+      const v = Number(data.purchaseDiscountPercent);
+      if (isNaN(v) || !isFinite(v) || v < 0 || v > 100) throw new Error('Purchase discount percentage must be between 0 and 100.');
+    }
+    if (data.sellingPrice !== undefined) {
+      const v = Number(data.sellingPrice);
+      if (isNaN(v) || !isFinite(v) || v < 0) throw new Error('Selling price must be a valid non-negative number.');
+    }
+    if (data.lowStockLimit !== undefined) {
+      const v = Number(data.lowStockLimit);
+      if (isNaN(v) || !isFinite(v) || v < 0) throw new Error('Low stock limit must be a valid non-negative number.');
+    }
+
     const mrp = data.mrp !== undefined ? Number(data.mrp) : existing.mrp;
     const discount =
       data.purchaseDiscountPercent !== undefined
@@ -115,7 +164,7 @@ export class ProductService {
 
     const calculatedCost = calculatePurchasePrice(mrp, discount);
     const purchasePrice =
-      data.customPurchasePrice !== undefined && data.customPurchasePrice >= 0
+      data.customPurchasePrice !== undefined && isFinite(data.customPurchasePrice) && data.customPurchasePrice >= 0
         ? data.customPurchasePrice
         : calculatedCost;
 
