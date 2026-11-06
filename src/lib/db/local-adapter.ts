@@ -9,6 +9,7 @@ import {
   Invoice,
   InvoiceItem,
   InvoiceReturn,
+  InvoicePayment,
   CustomFieldDefinition,
   ShopProfile,
   DashboardStats,
@@ -23,7 +24,10 @@ import {
   ICustomFieldRepository,
   IShopRepository,
   ProductFilter,
+  InvoiceListFilter,
+  OutstandingSummary,
 } from './types';
+import { computeBalanceDue, derivePaymentStatus, netInvoiceTotal, round2 } from '@/lib/payments';
 
 const DATA_DIR = path.join(process.cwd(), '.tradestock-data');
 const DB_FILE = path.join(DATA_DIR, 'shop-database.json');
@@ -713,31 +717,98 @@ export class LocalStockRepository implements IStockRepository {
   }
 }
 
+/**
+ * Invoices saved before the balance feature have no payment fields.
+ * They were paid in full (returns refunded in cash), so fill that in on read.
+ */
+export function normalizeLocalInvoice(inv: Invoice, allReturns: InvoiceReturn[]): Invoice {
+  const returns = allReturns.filter((r) => r.invoiceId === inv.id);
+  const returnedTotal = returns.reduce((sum, r) => sum + (Number(r.totalReturnedAmount) || 0), 0);
+  const legacy = inv.amountPaid === undefined || inv.amountPaid === null;
+  const amountPaid = legacy ? netInvoiceTotal(inv.finalTotal, returnedTotal) : round2(Number(inv.amountPaid));
+  const balanceDue = legacy
+    ? 0
+    : inv.balanceDue !== undefined && inv.balanceDue !== null
+      ? round2(Number(inv.balanceDue))
+      : computeBalanceDue(inv.finalTotal, returnedTotal, amountPaid);
+  return {
+    ...inv,
+    amountPaid,
+    balanceDue,
+    paymentStatus: derivePaymentStatus(inv.status, amountPaid, balanceDue),
+    payments: inv.payments ?? [],
+    returns,
+  };
+}
+
 export class LocalInvoiceRepository implements IInvoiceRepository {
   private db = LocalDatabaseManager.getInstance();
+
+  private normalize(inv: Invoice): Invoice {
+    return normalizeLocalInvoice(inv, this.db.getData().invoiceReturns || []);
+  }
 
   async findById(id: string): Promise<Invoice | null> {
     const inv = this.db.getData().invoices.find((i) => i.id === id);
     if (!inv) return null;
-    const returns = this.db.getData().invoiceReturns.filter((r) => r.invoiceId === id);
-    return { ...inv, returns };
+    return this.normalize(inv);
   }
 
   async findByInvoiceNumber(invoiceNumber: string): Promise<Invoice | null> {
     const inv = this.db.getData().invoices.find(
       (i) => i.invoiceNumber.trim().toUpperCase() === invoiceNumber.trim().toUpperCase()
     );
-    return inv ? { ...inv } : null;
+    return inv ? this.normalize(inv) : null;
   }
 
-  async findMany(filter?: {
-    startDate?: string;
-    endDate?: string;
-    customerSearch?: string;
-    limit?: number;
-    offset?: number;
-  }): Promise<{ invoices: Invoice[]; totalCount: number }> {
-    let invoices = [...this.db.getData().invoices];
+  async applyPaymentChange(
+    invoiceId: string,
+    totals: { amountPaid: number; balanceDue: number },
+    payment?: Omit<InvoicePayment, 'id' | 'invoiceId'> | null
+  ): Promise<Invoice> {
+    const invoices = this.db.getData().invoices;
+    const index = invoices.findIndex((i) => i.id === invoiceId);
+    if (index === -1) throw new Error('Invoice not found.');
+    const current = this.normalize(invoices[index]);
+    const { returns: _omitReturns, paymentStatus: _omitStatus, ...stored } = current;
+    void _omitReturns;
+    void _omitStatus;
+    invoices[index] = {
+      ...stored,
+      paymentStatus: derivePaymentStatus(current.status, totals.amountPaid, totals.balanceDue),
+      amountPaid: totals.amountPaid,
+      balanceDue: totals.balanceDue,
+      payments: payment
+        ? [
+            ...(current.payments ?? []),
+            { ...payment, id: 'pay_' + Math.random().toString(36).substring(2, 9), invoiceId },
+          ]
+        : current.payments ?? [],
+      updatedAt: new Date().toISOString(),
+    };
+    this.db.persist();
+    return this.normalize(invoices[index]);
+  }
+
+  async getOutstandingSummary(): Promise<OutstandingSummary> {
+    const due = this.db
+      .getData()
+      .invoices.map((i) => this.normalize(i))
+      .filter((i) => i.status !== 'CANCELLED' && i.balanceDue > 0);
+    return {
+      totalOutstanding: round2(due.reduce((sum, i) => sum + i.balanceDue, 0)),
+      invoiceCount: due.length,
+    };
+  }
+
+  async findMany(filter?: InvoiceListFilter): Promise<{ invoices: Invoice[]; totalCount: number }> {
+    let invoices = this.db.getData().invoices.map((i) => this.normalize(i));
+
+    if (filter?.balanceFilter === 'DUE') {
+      invoices = invoices.filter((i) => i.status !== 'CANCELLED' && i.balanceDue > 0);
+    } else if (filter?.balanceFilter === 'PAID') {
+      invoices = invoices.filter((i) => i.balanceDue <= 0);
+    }
 
     if (filter?.startDate) {
       const s = new Date(filter.startDate).getTime();
@@ -795,6 +866,20 @@ export class LocalInvoiceRepository implements IInvoiceRepository {
       updatedAt: new Date().toISOString(),
       items: invoiceItems,
       returns: [],
+      payments:
+        invoiceData.amountPaid > 0
+          ? [
+              {
+                id: 'pay_' + Math.random().toString(36).substring(2, 9),
+                invoiceId,
+                type: 'PAYMENT',
+                amount: invoiceData.amountPaid,
+                paymentMode: invoiceData.paymentMode,
+                note: 'Paid at billing',
+                paidAt: invoiceData.billDate,
+              },
+            ]
+          : [],
     };
 
     this.db.getData().invoices.push(newInvoice);
@@ -832,7 +917,7 @@ export class LocalInvoiceRepository implements IInvoiceRepository {
 
     invoices[index] = updated;
     this.db.persist();
-    return updated;
+    return this.normalize(updated);
   }
 
   async getMonthlySummary(year: number, month: number): Promise<MonthlyBillingSummary> {

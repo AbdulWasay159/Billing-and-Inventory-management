@@ -6,6 +6,7 @@ import {
   Invoice,
   InvoiceItem,
   InvoiceReturn,
+  InvoicePayment,
   CustomFieldDefinition,
   ShopProfile,
   DashboardStats,
@@ -56,16 +57,30 @@ export interface IStockRepository {
   ): Promise<{ newStock: number; transaction: StockTransaction }>;
 }
 
+export interface InvoiceListFilter {
+  startDate?: string;
+  endDate?: string;
+  customerSearch?: string;
+  balanceFilter?: 'all' | 'DUE' | 'PAID';
+  limit?: number;
+  offset?: number;
+}
+
+export interface OutstandingSummary {
+  totalOutstanding: number;
+  invoiceCount: number;
+}
+
 export interface IInvoiceRepository {
   findById(id: string): Promise<Invoice | null>;
   findByInvoiceNumber(invoiceNumber: string): Promise<Invoice | null>;
-  findMany(filter?: {
-    startDate?: string;
-    endDate?: string;
-    customerSearch?: string;
-    limit?: number;
-    offset?: number;
-  }): Promise<{ invoices: Invoice[]; totalCount: number }>;
+  findMany(filter?: InvoiceListFilter): Promise<{ invoices: Invoice[]; totalCount: number }>;
+  getOutstandingSummary(): Promise<OutstandingSummary>;
+  applyPaymentChange(
+    invoiceId: string,
+    totals: { amountPaid: number; balanceDue: number },
+    payment?: Omit<InvoicePayment, 'id' | 'invoiceId'> | null
+  ): Promise<Invoice>;
   generateNextInvoiceNumber(): Promise<string>;
   create(
     invoiceData: Omit<Invoice, 'id' | 'createdAt' | 'updatedAt' | 'items'>,

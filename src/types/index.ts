@@ -11,6 +11,20 @@ export type StockTransactionType =
 
 export type InvoiceStatus = 'COMPLETED' | 'EDITED' | 'CANCELLED';
 
+export type PaymentStatus = 'PAID' | 'PARTIAL' | 'UNPAID';
+
+export type InvoicePaymentType = 'PAYMENT' | 'REFUND';
+
+export interface InvoicePayment {
+  id: string;
+  invoiceId: string;
+  type: InvoicePaymentType;
+  amount: number; // Positive for payments, negative for refunds
+  paymentMode: PaymentMode;
+  note?: string;
+  paidAt: string;
+}
+
 export type CustomFieldDataType = 'TEXT' | 'NUMBER' | 'DATE' | 'BOOLEAN';
 
 export interface CustomFieldDefinition {
@@ -102,12 +116,16 @@ export interface Invoice {
   subtotal: number;
   discountAmount: number;
   finalTotal: number;
+  amountPaid: number; // Net amount collected (payments minus refunds)
+  balanceDue: number; // Amount still to be collected
+  paymentStatus: PaymentStatus;
   status: InvoiceStatus;
   notes?: string;
   createdAt: string;
   updatedAt: string;
   items: InvoiceItem[];
   returns?: InvoiceReturn[];
+  payments?: InvoicePayment[];
 }
 
 export interface ReturnItem {
@@ -129,6 +147,10 @@ export interface InvoiceReturn {
   reason?: string;
   createdAt: string;
   items: ReturnItem[];
+  /** Cash actually handed back (only set on the response of a new return). */
+  cashRefundAmount?: number;
+  /** Part of the return value that cleared the unpaid balance instead. */
+  balanceAdjustedAmount?: number;
 }
 
 export interface ShopProfile {

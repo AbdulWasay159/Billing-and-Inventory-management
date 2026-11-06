@@ -11,12 +11,13 @@ import {
   RotateCcw,
   ArrowLeft,
   Store,
-  CheckCircle,
-  Clock,
+  IndianRupee,
 } from 'lucide-react';
 import { formatCurrency, formatQuantity, paginateInvoiceItems } from '@/lib/utils';
 import { Invoice, ShopProfile } from '@/types';
 import { useShop } from '@/context/shop-context';
+import { PaymentStatusBadge } from '@/components/billing/payment-status-badge';
+import { RecordPaymentModal } from '@/components/billing/record-payment-modal';
 
 export default function InvoiceDetailPage() {
   const params = useParams();
@@ -27,6 +28,7 @@ export default function InvoiceDetailPage() {
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [shop, setShop] = useState<ShopProfile | null>(contextShop);
   const [loading, setLoading] = useState(true);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -95,6 +97,10 @@ export default function InvoiceDetailPage() {
   // Section 15: Pagination Chunks (Strict 20 items per page)
   const pageChunks = paginateInvoiceItems(invoice.items, 20);
 
+  const returnedTotal = (invoice.returns || []).reduce((sum, r) => sum + Number(r.totalReturnedAmount || 0), 0);
+  const hasBalance = invoice.balanceDue > 0 && invoice.status !== 'CANCELLED';
+  const payments = invoice.payments || [];
+
   return (
     <div className="space-y-6 pb-12">
       {/* Top Action Header (Hidden during print) */}
@@ -122,6 +128,7 @@ export default function InvoiceDetailPage() {
               >
                 {invoice.status}
               </span>
+              <PaymentStatusBadge status={invoice.paymentStatus} />
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
               Billed on {new Date(invoice.billDate).toLocaleDateString('en-IN', {
@@ -134,6 +141,16 @@ export default function InvoiceDetailPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {hasBalance && (
+            <button
+              onClick={() => setShowPaymentModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm shadow-emerald-600/25 transition-colors"
+            >
+              <IndianRupee className="w-3.5 h-3.5" />
+              <span>Record Payment</span>
+            </button>
+          )}
+
           {/* Edit Bill Action (Section 13) */}
           <Link
             href={`/invoices/${id}/edit`}
@@ -171,6 +188,82 @@ export default function InvoiceDetailPage() {
           </button>
         </div>
       </div>
+
+      {/* Payment summary & history (screen only) */}
+      <div className="print:hidden card-3d bg-white border border-slate-200/80 rounded-2xl shadow-sm p-5 space-y-4 max-w-[210mm] mx-auto">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+            <p className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Bill Total</p>
+            <p className="font-mono font-bold text-slate-900 mt-0.5">{formatCurrency(invoice.finalTotal)}</p>
+          </div>
+          <div className="rounded-xl bg-violet-50 border border-violet-200 p-3">
+            <p className="text-[10px] uppercase tracking-wider font-semibold text-violet-700">Returns</p>
+            <p className="font-mono font-bold text-violet-700 mt-0.5">{formatCurrency(returnedTotal)}</p>
+          </div>
+          <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3">
+            <p className="text-[10px] uppercase tracking-wider font-semibold text-emerald-700">Paid</p>
+            <p className="font-mono font-bold text-emerald-700 mt-0.5">{formatCurrency(invoice.amountPaid)}</p>
+          </div>
+          <div className={`rounded-xl border p-3 ${hasBalance ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`}>
+            <p className={`text-[10px] uppercase tracking-wider font-semibold ${hasBalance ? 'text-rose-700' : 'text-slate-500'}`}>Balance Due</p>
+            <p className={`font-mono font-bold mt-0.5 ${hasBalance ? 'text-rose-700' : 'text-slate-400'}`}>{formatCurrency(invoice.balanceDue)}</p>
+          </div>
+        </div>
+
+        {payments.length > 0 && (
+          <div>
+            <h3 className="text-xs font-bold text-slate-900 mb-2">Payment History</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                  <tr>
+                    <th className="py-2 pr-3">Date</th>
+                    <th className="py-2 pr-3">Type</th>
+                    <th className="py-2 pr-3">Mode</th>
+                    <th className="py-2 pr-3">Note</th>
+                    <th className="py-2 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {payments.map((p) => (
+                    <tr key={p.id}>
+                      <td className="py-2 pr-3 text-slate-600 whitespace-nowrap">
+                        {new Date(p.paidAt).toLocaleString('en-IN', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </td>
+                      <td className="py-2 pr-3">
+                        <span className={`font-semibold ${p.type === 'REFUND' ? 'text-violet-700' : 'text-emerald-700'}`}>
+                          {p.type === 'REFUND' ? 'Refund' : 'Payment'}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-3 text-slate-600">{p.paymentMode}</td>
+                      <td className="py-2 pr-3 text-slate-500">{p.note || '—'}</td>
+                      <td className={`py-2 text-right font-mono font-bold ${p.amount < 0 ? 'text-violet-700' : 'text-emerald-700'}`}>
+                        {p.amount < 0 ? '- ' : ''}
+                        {formatCurrency(Math.abs(p.amount))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <RecordPaymentModal
+        invoice={showPaymentModal ? invoice : null}
+        onClose={() => setShowPaymentModal(false)}
+        onSaved={(updated) => {
+          setInvoice(updated);
+          setShowPaymentModal(false);
+        }}
+      />
 
       {/* --- A4 PRINT LAYOUT (SECTION 15 & 16) --- */}
       {/* Container enforces exact A4 sheets on screen and print media */}
@@ -319,6 +412,28 @@ export default function InvoiceDetailPage() {
                           ₹{Number(invoice.finalTotal).toFixed(2)}
                         </span>
                       </div>
+                      {(invoice.balanceDue > 0 || returnedTotal > 0) && (
+                        <>
+                          {returnedTotal > 0 && (
+                            <div className="flex justify-between text-slate-600">
+                              <span>Less Returns:</span>
+                              <span className="font-mono text-violet-700">- ₹{returnedTotal.toFixed(2)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-slate-600">
+                            <span>Amount Paid:</span>
+                            <span className="font-mono font-semibold text-emerald-700">
+                              ₹{Number(invoice.amountPaid).toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-baseline pt-1 border-t border-slate-300 font-bold text-slate-900">
+                            <span>Balance Due:</span>
+                            <span className={`font-mono text-base ${invoice.balanceDue > 0 ? 'text-rose-700' : 'text-slate-500'}`}>
+                              ₹{Number(invoice.balanceDue).toFixed(2)}
+                            </span>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
 

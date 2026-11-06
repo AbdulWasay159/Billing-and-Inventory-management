@@ -161,11 +161,25 @@ export function generateA4InvoicePdf(invoice: Invoice, shop: ShopProfile): jsPDF
 
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(8);
-          doc.text(
-            `Payment: ${invoice.paymentMode}  |  Items: ${invoice.items.length}`,
-            210 - marginX - 65,
-            pageBottomY - 5
-          );
+          const balanceDueVal = Number(invoice.balanceDue || 0);
+          if (balanceDueVal > 0) {
+            doc.text(
+              `Paid: ${curr}${Number(invoice.amountPaid || 0).toFixed(2)} (${invoice.paymentMode})`,
+              210 - marginX - 65,
+              pageBottomY - 5
+            );
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(190, 18, 60);
+            doc.text(`BALANCE DUE: ${curr}${balanceDueVal.toFixed(2)}`, 210 - marginX - 65, pageBottomY - 1);
+            doc.setTextColor(15, 23, 42);
+            doc.setFont('helvetica', 'normal');
+          } else {
+            doc.text(
+              `Payment: ${invoice.paymentMode}  |  Items: ${invoice.items.length}`,
+              210 - marginX - 65,
+              pageBottomY - 5
+            );
+          }
         } else {
           doc.setFont('helvetica', 'italic');
           doc.text(`Continued on page ${pageChunk.pageNumber + 1}...`, 210 - marginX - 65, pageBottomY - 9);

@@ -44,6 +44,8 @@ interface ComprehensiveData {
     totalDiscounts: number;
     totalRefunds: number;
     netSales: number;
+    amountCollected?: number;
+    balanceOutstanding?: number;
     cogs: number;
     grossProfit: number;
     grossProfitMarginPercent: number;
@@ -264,6 +266,8 @@ export default function AnalyticsPage() {
     csv += `Total Discounts,₹${data.kpis.totalDiscounts.toFixed(2)}\n`;
     csv += `Total Refunds / Returns,₹${data.kpis.totalRefunds.toFixed(2)}\n`;
     csv += `Net Sales,₹${data.kpis.netSales.toFixed(2)}\n`;
+    csv += `Amount Collected,₹${(data.kpis.amountCollected || 0).toFixed(2)}\n`;
+    csv += `Balance Outstanding,₹${(data.kpis.balanceOutstanding || 0).toFixed(2)}\n`;
     csv += `Cost of Goods Sold (COGS),₹${data.kpis.cogs.toFixed(2)}\n`;
     csv += `Gross Profit (Net Sales - COGS),₹${data.kpis.grossProfit.toFixed(2)}\n`;
     csv += `Gross Profit Margin %,${data.kpis.grossProfitMarginPercent.toFixed(2)}%\n\n`;
@@ -458,6 +462,11 @@ export default function AnalyticsPage() {
             <p className="text-xs text-emerald-600 mt-1.5 font-medium">
               After ₹{(data?.kpis.totalRefunds || 0).toFixed(2)} refunds
             </p>
+            {(data?.kpis.balanceOutstanding || 0) > 0 && (
+              <p className="text-xs text-rose-600 mt-0.5 font-medium">
+                ₹{(data?.kpis.balanceOutstanding || 0).toFixed(2)} still to collect
+              </p>
+            )}
           </div>
           <div className="p-3 rounded-2xl bg-indigo-50 text-indigo-600 border border-indigo-200/60 shadow-2xs">
             <TrendingUp className="w-6 h-6" />

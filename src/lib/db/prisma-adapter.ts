@@ -7,6 +7,7 @@ import {
   Invoice,
   InvoiceItem,
   InvoiceReturn,
+  InvoicePayment,
   ReturnItem,
   CustomFieldDefinition,
   ShopProfile,
@@ -22,7 +23,10 @@ import {
   ICustomFieldRepository,
   IShopRepository,
   ProductFilter,
+  InvoiceListFilter,
+  OutstandingSummary,
 } from './types';
+import { derivePaymentStatus, round2 } from '@/lib/payments';
 
 // ==========================================
 // Helper Type Mappers
@@ -113,6 +117,8 @@ export function mapInvoiceItem(item: any): InvoiceItem {
 }
 
 export function mapInvoice(inv: any): Invoice {
+  const amountPaid = inv.amountPaid !== undefined && inv.amountPaid !== null ? Number(inv.amountPaid) : Number(inv.finalTotal);
+  const balanceDue = inv.balanceDue !== undefined && inv.balanceDue !== null ? Number(inv.balanceDue) : 0;
   return {
     id: inv.id,
     invoiceNumber: inv.invoiceNumber,
@@ -123,12 +129,28 @@ export function mapInvoice(inv: any): Invoice {
     subtotal: Number(inv.subtotal),
     discountAmount: Number(inv.discountAmount),
     finalTotal: Number(inv.finalTotal),
+    amountPaid,
+    balanceDue,
+    paymentStatus: derivePaymentStatus(inv.status, amountPaid, balanceDue),
     status: inv.status as any,
     notes: inv.notes ?? undefined,
     createdAt: toIsoString(inv.createdAt),
     updatedAt: toIsoString(inv.updatedAt),
     items: inv.items ? inv.items.map(mapInvoiceItem) : [],
     returns: inv.returns ? inv.returns.map(mapInvoiceReturn) : undefined,
+    payments: inv.payments ? inv.payments.map(mapInvoicePayment) : undefined,
+  };
+}
+
+export function mapInvoicePayment(p: any): InvoicePayment {
+  return {
+    id: p.id,
+    invoiceId: p.invoiceId,
+    type: (p.type === 'REFUND' ? 'REFUND' : 'PAYMENT') as InvoicePayment['type'],
+    amount: Number(p.amount),
+    paymentMode: p.paymentMode as any,
+    note: p.note ?? undefined,
+    paidAt: toIsoString(p.paidAt),
   };
 }
 
@@ -594,6 +616,7 @@ export class PrismaInvoiceRepository implements IInvoiceRepository {
       include: {
         items: true,
         returns: { include: { items: true } },
+        payments: { orderBy: { paidAt: 'asc' } },
       },
     });
     return invoice ? mapInvoice(invoice) : null;
@@ -605,19 +628,21 @@ export class PrismaInvoiceRepository implements IInvoiceRepository {
       include: {
         items: true,
         returns: { include: { items: true } },
+        payments: { orderBy: { paidAt: 'asc' } },
       },
     });
     return invoice ? mapInvoice(invoice) : null;
   }
 
-  async findMany(filter?: {
-    startDate?: string;
-    endDate?: string;
-    customerSearch?: string;
-    limit?: number;
-    offset?: number;
-  }): Promise<{ invoices: Invoice[]; totalCount: number }> {
+  async findMany(filter?: InvoiceListFilter): Promise<{ invoices: Invoice[]; totalCount: number }> {
     const where: any = {};
+
+    if (filter?.balanceFilter === 'DUE') {
+      where.balanceDue = { gt: 0 };
+      where.status = { not: 'CANCELLED' };
+    } else if (filter?.balanceFilter === 'PAID') {
+      where.balanceDue = { lte: 0 };
+    }
 
     if (filter?.startDate || filter?.endDate) {
       where.billDate = {};
@@ -643,6 +668,7 @@ export class PrismaInvoiceRepository implements IInvoiceRepository {
         include: {
           items: true,
           returns: { include: { items: true } },
+          payments: { orderBy: { paidAt: 'asc' } },
         },
       }),
       prisma.invoice.count({ where }),
@@ -651,6 +677,51 @@ export class PrismaInvoiceRepository implements IInvoiceRepository {
     return {
       invoices: invoices.map(mapInvoice),
       totalCount,
+    };
+  }
+
+  async applyPaymentChange(
+    invoiceId: string,
+    totals: { amountPaid: number; balanceDue: number },
+    payment?: Omit<InvoicePayment, 'id' | 'invoiceId'> | null
+  ): Promise<Invoice> {
+    const updated = await prisma.invoice.update({
+      where: { id: invoiceId },
+      data: {
+        amountPaid: totals.amountPaid,
+        balanceDue: totals.balanceDue,
+        payments: payment
+          ? {
+              create: [
+                {
+                  type: payment.type,
+                  amount: payment.amount,
+                  paymentMode: payment.paymentMode,
+                  note: payment.note,
+                  paidAt: new Date(payment.paidAt),
+                },
+              ],
+            }
+          : undefined,
+      },
+      include: {
+        items: true,
+        returns: { include: { items: true } },
+        payments: { orderBy: { paidAt: 'asc' } },
+      },
+    });
+    return mapInvoice(updated);
+  }
+
+  async getOutstandingSummary(): Promise<OutstandingSummary> {
+    const agg = await prisma.invoice.aggregate({
+      where: { balanceDue: { gt: 0 }, status: { not: 'CANCELLED' } },
+      _sum: { balanceDue: true },
+      _count: { _all: true },
+    });
+    return {
+      totalOutstanding: round2(Number(agg._sum.balanceDue ?? 0)),
+      invoiceCount: agg._count._all,
     };
   }
 
@@ -677,8 +748,24 @@ export class PrismaInvoiceRepository implements IInvoiceRepository {
         subtotal: invoiceData.subtotal,
         discountAmount: invoiceData.discountAmount,
         finalTotal: invoiceData.finalTotal,
+        amountPaid: invoiceData.amountPaid,
+        balanceDue: invoiceData.balanceDue,
         status: invoiceData.status || 'COMPLETED',
         notes: invoiceData.notes,
+        payments:
+          invoiceData.amountPaid > 0
+            ? {
+                create: [
+                  {
+                    type: 'PAYMENT',
+                    amount: invoiceData.amountPaid,
+                    paymentMode: invoiceData.paymentMode,
+                    note: 'Paid at billing',
+                    paidAt: new Date(invoiceData.billDate),
+                  },
+                ],
+              }
+            : undefined,
         items: {
           create: items.map((item) => ({
             productId: item.productId,
@@ -696,6 +783,7 @@ export class PrismaInvoiceRepository implements IInvoiceRepository {
       include: {
         items: true,
         returns: { include: { items: true } },
+        payments: { orderBy: { paidAt: 'asc' } },
       },
     });
 
@@ -715,6 +803,8 @@ export class PrismaInvoiceRepository implements IInvoiceRepository {
       if (updates.subtotal !== undefined) updateData.subtotal = updates.subtotal;
       if (updates.discountAmount !== undefined) updateData.discountAmount = updates.discountAmount;
       if (updates.finalTotal !== undefined) updateData.finalTotal = updates.finalTotal;
+      if (updates.amountPaid !== undefined) updateData.amountPaid = updates.amountPaid;
+      if (updates.balanceDue !== undefined) updateData.balanceDue = updates.balanceDue;
       if (updates.status !== undefined) updateData.status = updates.status;
       if (updates.notes !== undefined) updateData.notes = updates.notes;
 
@@ -745,6 +835,7 @@ export class PrismaInvoiceRepository implements IInvoiceRepository {
         include: {
           items: true,
           returns: { include: { items: true } },
+          payments: { orderBy: { paidAt: 'asc' } },
         },
       });
 

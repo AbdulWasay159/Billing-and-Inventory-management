@@ -14,16 +14,22 @@ export async function GET(request: Request) {
     const customerSearch = searchParams.get('customer') || undefined;
     const limit = searchParams.get('limit') ? Number(searchParams.get('limit')) : undefined;
     const offset = searchParams.get('offset') ? Number(searchParams.get('offset')) : undefined;
+    const balanceParam = (searchParams.get('balance') || '').toUpperCase();
+    const balanceFilter = balanceParam === 'DUE' || balanceParam === 'PAID' ? balanceParam : undefined;
 
-    const result = await billingService.getInvoices({
-      startDate,
-      endDate,
-      customerSearch,
-      limit,
-      offset,
-    });
+    const [result, outstanding] = await Promise.all([
+      billingService.getInvoices({
+        startDate,
+        endDate,
+        customerSearch,
+        balanceFilter,
+        limit,
+        offset,
+      }),
+      billingService.getOutstandingSummary(),
+    ]);
 
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, outstanding });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

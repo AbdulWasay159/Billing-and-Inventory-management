@@ -47,6 +47,9 @@ export default function BillingPage() {
   const [discountAmount, setDiscountAmount] = useState('0');
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<BillDraftItem[]>([]);
+  // Part payment: when off, the bill is paid in full
+  const [isPartPayment, setIsPartPayment] = useState(false);
+  const [amountReceived, setAmountReceived] = useState('');
 
   // Action status
   const [submitting, setSubmitting] = useState(false);
@@ -153,6 +156,12 @@ export default function BillingPage() {
   const subtotal = items.reduce((acc, it) => acc + it.lineTotal, 0);
   const discount = Math.max(0, Number(discountAmount) || 0);
   const finalTotal = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
+  const receivedValue = Number(amountReceived);
+  const receivedIsValid =
+    amountReceived.trim() !== '' && !isNaN(receivedValue) && receivedValue >= 0 && receivedValue <= finalTotal;
+  const amountPaidNow = isPartPayment ? (receivedIsValid ? Math.round(receivedValue * 100) / 100 : 0) : finalTotal;
+  const balanceDue = Math.max(0, Math.round((finalTotal - amountPaidNow) * 100) / 100);
+  const needsCustomer = isPartPayment && balanceDue > 0;
 
   // Submit and create invoice atomically (Section 12)
   const handleSaveInvoice = async () => {
@@ -164,6 +173,17 @@ export default function BillingPage() {
     if (items.length > 200) {
       setError('An invoice cannot contain more than 200 items (10 A4 pages maximum).');
       return;
+    }
+
+    if (isPartPayment) {
+      if (!receivedIsValid) {
+        setError(`Enter the amount received now (between ₹0 and ₹${finalTotal.toFixed(2)}).`);
+        return;
+      }
+      if (needsCustomer && (!customerName.trim() || !customerPhone.trim())) {
+        setError('Customer name and phone are required when a balance is left to be paid.');
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -178,6 +198,7 @@ export default function BillingPage() {
           customerPhone: customerPhone.trim() || undefined,
           paymentMode,
           discountAmount: discount,
+          amountPaid: isPartPayment ? amountPaidNow : undefined,
           notes: notes.trim() || undefined,
           items: items.map((it) => ({
             productId: it.productId,
@@ -202,6 +223,8 @@ export default function BillingPage() {
       setCustomerPhone('');
       setDiscountAmount('0');
       setNotes('');
+      setIsPartPayment(false);
+      setAmountReceived('');
       setCreatedInvoiceId(invoiceId);
       router.push(`/invoices/${invoiceId}`);
     } catch (err: any) {
@@ -218,6 +241,8 @@ export default function BillingPage() {
     setCustomerPhone('');
     setDiscountAmount('0');
     setNotes('');
+    setIsPartPayment(false);
+    setAmountReceived('');
     setError(null);
   };
 
@@ -423,7 +448,7 @@ export default function BillingPage() {
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Customer Name (Optional)
+                Customer Name {needsCustomer ? <span className="text-rose-600">*</span> : '(Optional)'}
               </label>
               <input
                 type="text"
@@ -436,7 +461,7 @@ export default function BillingPage() {
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Customer Phone (Optional)
+                Customer Phone {needsCustomer ? <span className="text-rose-600">*</span> : '(Optional)'}
               </label>
               <input
                 type="tel"
@@ -508,6 +533,66 @@ export default function BillingPage() {
                   ₹{finalTotal.toFixed(2)}
                 </span>
               </div>
+            </div>
+
+            {/* Payment received: full or part */}
+            <div className="pt-3 border-t border-slate-100 space-y-2.5 text-xs">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPartPayment(false);
+                    setAmountReceived('');
+                  }}
+                  className={`py-2 rounded-xl border text-xs font-semibold transition-all ${
+                    !isPartPayment
+                      ? 'border-emerald-600 bg-emerald-50 text-emerald-800'
+                      : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  Full Payment
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPartPayment(true)}
+                  className={`py-2 rounded-xl border text-xs font-semibold transition-all ${
+                    isPartPayment
+                      ? 'border-amber-600 bg-amber-50 text-amber-800'
+                      : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  Part Payment
+                </button>
+              </div>
+
+              {isPartPayment && (
+                <>
+                  <div className="flex items-center justify-between text-slate-600">
+                    <span>Amount Received (₹):</span>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      max={finalTotal}
+                      value={amountReceived}
+                      onChange={(e) => setAmountReceived(e.target.value)}
+                      placeholder="0.00"
+                      className={`w-28 px-2.5 py-1 text-right text-xs border rounded-lg font-mono focus:outline-none focus:ring-2 transition-all text-slate-900 ${
+                        amountReceived !== '' && !receivedIsValid
+                          ? 'border-rose-400 focus:ring-rose-500/20'
+                          : 'border-slate-200 focus:ring-amber-500/20 focus:border-amber-600'
+                      }`}
+                    />
+                  </div>
+                  {amountReceived !== '' && !receivedIsValid && (
+                    <p className="text-[11px] text-rose-600">Can&apos;t be more than the bill total.</p>
+                  )}
+                  <div className="flex justify-between items-baseline rounded-xl bg-rose-50 border border-rose-200 px-3 py-2">
+                    <span className="font-bold text-rose-800">Balance Due:</span>
+                    <span className="font-mono text-lg font-bold text-rose-700">₹{balanceDue.toFixed(2)}</span>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Save Bill Action */}

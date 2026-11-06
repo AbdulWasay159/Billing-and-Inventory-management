@@ -43,6 +43,7 @@ async function resetPrisma() {
   try {
     const result = await prisma.$transaction(async (tx) => {
       // Children first, then parents (respecting foreign keys).
+      const invoicePayments = await tx.invoicePayment.deleteMany();
       const returnItems = await tx.returnItem.deleteMany();
       const invoiceReturns = await tx.invoiceReturn.deleteMany();
       const invoiceItems = await tx.invoiceItem.deleteMany();
@@ -73,6 +74,7 @@ async function resetPrisma() {
         invoiceItems: invoiceItems.count,
         invoiceReturns: invoiceReturns.count,
         returnItems: returnItems.count,
+        invoicePayments: invoicePayments.count,
         customFieldDefinitions: customFieldDefinitions.count,
         customFieldValues: customFieldValues.count,
         auditLogs: auditLogs.count,

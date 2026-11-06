@@ -8,6 +8,19 @@ import {
 import { prisma } from '@/lib/db/prisma';
 import { mapInvoiceReturn } from '@/lib/db/prisma-adapter';
 import { InvoiceReturn } from '@/types';
+import { netInvoiceTotal, round2 } from '@/lib/payments';
+
+/**
+ * After a return the bill is worth less. The return first clears any unpaid balance;
+ * only what's left over is refunded in cash.
+ */
+function settleAfterReturn(finalTotal: number, returnedTotal: number, amountPaid: number) {
+  const net = netInvoiceTotal(finalTotal, returnedTotal);
+  const cashRefund = round2(Math.max(0, amountPaid - net));
+  const newAmountPaid = round2(amountPaid - cashRefund);
+  const balanceDue = round2(Math.max(0, net - newAmountPaid));
+  return { cashRefund, amountPaid: newAmountPaid, balanceDue };
+}
 
 export interface ProcessReturnInput {
   invoiceId: string;
@@ -165,7 +178,42 @@ export class ReturnService {
           });
         }
 
-        return mapInvoiceReturn(invoiceReturn);
+        // Settle balance / cash refund for this return
+        const returnedTotal =
+          existingReturns.reduce((sum, r) => sum + (Number(r.totalReturnedAmount) || 0), 0) +
+          Number(invoiceReturn.totalReturnedAmount);
+        const previousBalance = round2(Number(invoice.balanceDue ?? 0));
+        const settled = settleAfterReturn(
+          Number(invoice.finalTotal),
+          returnedTotal,
+          Number(invoice.amountPaid ?? invoice.finalTotal)
+        );
+        await tx.invoice.update({
+          where: { id: invoice.id },
+          data: {
+            amountPaid: settled.amountPaid,
+            balanceDue: settled.balanceDue,
+            payments:
+              settled.cashRefund > 0
+                ? {
+                    create: [
+                      {
+                        type: 'REFUND',
+                        amount: -settled.cashRefund,
+                        paymentMode: invoice.paymentMode,
+                        note: `Refund for return ${invoiceReturn.returnNumber}`,
+                      },
+                    ],
+                  }
+                : undefined,
+          },
+        });
+
+        return {
+          ...mapInvoiceReturn(invoiceReturn),
+          cashRefundAmount: settled.cashRefund,
+          balanceAdjustedAmount: round2(Math.max(0, previousBalance - settled.balanceDue)),
+        };
       });
     }
 
@@ -278,7 +326,30 @@ export class ReturnService {
       throw restoreErr;
     }
 
-    return invoiceReturn;
+    // Step 3: Settle balance / cash refund for this return
+    const returnedTotal =
+      existingReturns.reduce((sum, r) => sum + (Number(r.totalReturnedAmount) || 0), 0) +
+      Number(invoiceReturn.totalReturnedAmount);
+    const settled = settleAfterReturn(invoice.finalTotal, returnedTotal, invoice.amountPaid);
+    await this.invoiceRepo.applyPaymentChange(
+      invoice.id,
+      { amountPaid: settled.amountPaid, balanceDue: settled.balanceDue },
+      settled.cashRefund > 0
+        ? {
+            type: 'REFUND',
+            amount: -settled.cashRefund,
+            paymentMode: invoice.paymentMode,
+            note: `Refund for return ${invoiceReturn.returnNumber}`,
+            paidAt: new Date().toISOString(),
+          }
+        : null
+    );
+
+    return {
+      ...invoiceReturn,
+      cashRefundAmount: settled.cashRefund,
+      balanceAdjustedAmount: round2(Math.max(0, invoice.balanceDue - settled.balanceDue)),
+    };
   }
 
   async getReturnsForInvoice(invoiceId: string): Promise<InvoiceReturn[]> {

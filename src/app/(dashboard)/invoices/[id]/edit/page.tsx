@@ -412,6 +412,32 @@ export default function EditInvoicePage() {
               <span className="text-slate-900 font-bold">Revised Total Amount:</span>
               <span className="text-xl font-bold font-mono text-blue-700">₹{finalTotal.toFixed(2)}</span>
             </div>
+            {invoice && (
+              <>
+                <div className="flex justify-between items-center text-slate-600">
+                  <span>Already Paid:</span>
+                  <span className="font-mono font-semibold text-emerald-700">
+                    ₹{Math.min(Number(invoice.amountPaid), finalTotal).toFixed(2)}
+                  </span>
+                </div>
+                {Number(invoice.balanceDue) <= 0 && finalTotal > Number(invoice.amountPaid) ? (
+                  <div className="flex justify-between items-center font-semibold text-blue-700">
+                    <span>Extra to Collect Now:</span>
+                    <span className="font-mono">₹{(finalTotal - Number(invoice.amountPaid)).toFixed(2)}</span>
+                  </div>
+                ) : Number(invoice.amountPaid) > finalTotal ? (
+                  <div className="flex justify-between items-center font-semibold text-violet-700">
+                    <span>Refund to Customer:</span>
+                    <span className="font-mono">₹{(Number(invoice.amountPaid) - finalTotal).toFixed(2)}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between items-center font-semibold text-rose-700">
+                    <span>Balance Due After Edit:</span>
+                    <span className="font-mono">₹{Math.max(0, finalTotal - Number(invoice.amountPaid)).toFixed(2)}</span>
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           <div className="flex justify-end gap-2.5 pt-2">

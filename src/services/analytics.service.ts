@@ -42,6 +42,8 @@ export class AnalyticsService {
     const { invoices } = await this.invoiceRepo.findMany({
       startDate,
       endDate,
+      // Without an explicit limit the Prisma repo returns only 50 invoices.
+      limit: 100000,
     });
     const { products } = await this.productRepo.findMany({});
     const productMap = new Map<string, Product>();
@@ -332,6 +334,8 @@ export class AnalyticsService {
         totalDiscounts: Math.round(totalDiscounts * 100) / 100,
         totalRefunds: Math.round(totalRefunds * 100) / 100,
         netSales,
+        amountCollected: Math.round(validInvoices.reduce((sum, i) => sum + Number(i.amountPaid || 0), 0) * 100) / 100,
+        balanceOutstanding: Math.round(validInvoices.reduce((sum, i) => sum + Number(i.balanceDue || 0), 0) * 100) / 100,
         cogs: Math.round(totalCOGS * 100) / 100,
         grossProfit,
         grossProfitMarginPercent,
@@ -357,6 +361,8 @@ export class AnalyticsService {
         subtotal: i.subtotal,
         discountAmount: i.discountAmount,
         finalTotal: i.finalTotal,
+        amountPaid: i.amountPaid,
+        balanceDue: i.balanceDue,
         status: i.status,
         itemCount: i.items.length,
       })),

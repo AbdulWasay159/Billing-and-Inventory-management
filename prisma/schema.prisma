@@ -101,15 +101,19 @@ model Invoice {
   subtotal       Decimal  @default(0) @db.Decimal(12, 2)
   discountAmount Decimal  @default(0) @map("discount_amount") @db.Decimal(12, 2)
   finalTotal     Decimal  @default(0) @map("final_total") @db.Decimal(12, 2)
+  amountPaid     Decimal  @default(0) @map("amount_paid") @db.Decimal(12, 2) // Net cash collected (payments minus refunds)
+  balanceDue     Decimal  @default(0) @map("balance_due") @db.Decimal(12, 2) // (finalTotal - returns) - amountPaid, never negative
   status         String   @default("COMPLETED") // COMPLETED, EDITED, CANCELLED
   notes          String?
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  items   InvoiceItem[]
-  returns InvoiceReturn[]
+  items    InvoiceItem[]
+  returns  InvoiceReturn[]
+  payments InvoicePayment[]
 
   @@index([invoiceNumber])
+  @@index([balanceDue])
   @@index([billDate])
   @@index([status])
   @@map("invoices")
@@ -135,6 +139,21 @@ model InvoiceItem {
   @@index([invoiceId])
   @@index([productId])
   @@map("invoice_items")
+}
+
+model InvoicePayment {
+  id          String   @id @default(uuid())
+  invoiceId   String   @map("invoice_id")
+  type        String   @default("PAYMENT") // PAYMENT, REFUND
+  amount      Decimal  @db.Decimal(12, 2) // Positive for payments, negative for refunds
+  paymentMode String   @default("CASH") @map("payment_mode") // CASH, UPI
+  note        String?
+  paidAt      DateTime @default(now()) @map("paid_at")
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_payments")
 }
 
 model InvoiceReturn {
@@ -234,4 +253,3 @@ model SequenceCounter {
 
   @@map("sequence_counters")
 }
-

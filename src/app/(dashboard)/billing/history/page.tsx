@@ -3,9 +3,13 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { FileText, Search, Calendar, Eye, Download, Printer, Plus } from 'lucide-react';
+import { Search, Eye, Download, Plus, Wallet, IndianRupee } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { Invoice } from '@/types';
+import { PaymentStatusBadge } from '@/components/billing/payment-status-badge';
+import { RecordPaymentModal } from '@/components/billing/record-payment-modal';
+
+type BalanceFilter = 'all' | 'DUE' | 'PAID';
 
 export default function InvoiceHistoryPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -13,6 +17,9 @@ export default function InvoiceHistoryPage() {
   const [search, setSearch] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [balanceFilter, setBalanceFilter] = useState<BalanceFilter>('all');
+  const [outstanding, setOutstanding] = useState<{ totalOutstanding: number; invoiceCount: number } | null>(null);
+  const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
 
   const fetchInvoices = async () => {
     setLoading(true);
@@ -25,11 +32,13 @@ export default function InvoiceHistoryPage() {
         e.setHours(23, 59, 59);
         params.set('endDate', e.toISOString());
       }
+      if (balanceFilter !== 'all') params.set('balance', balanceFilter);
       params.set('limit', '100');
 
       const res = await fetch(`/api/billing?${params.toString()}`);
       const data = await res.json();
       setInvoices(data.invoices || []);
+      if (data.outstanding) setOutstanding(data.outstanding);
     } catch (err) {
       console.error('Error fetching invoices:', err);
     } finally {
@@ -39,7 +48,17 @@ export default function InvoiceHistoryPage() {
 
   useEffect(() => {
     fetchInvoices();
-  }, [startDate, endDate]);
+  }, [startDate, endDate, balanceFilter]);
+
+  const handlePaymentSaved = (updated: Invoice) => {
+    setPayingInvoice(null);
+    setInvoices((prev) =>
+      balanceFilter === 'DUE' && updated.balanceDue <= 0
+        ? prev.filter((i) => i.id !== updated.id)
+        : prev.map((i) => (i.id === updated.id ? { ...i, ...updated } : i))
+    );
+    fetchInvoices();
+  };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,6 +84,50 @@ export default function InvoiceHistoryPage() {
           <Plus className="w-3.5 h-3.5" />
           <span>Create New Bill</span>
         </Link>
+      </div>
+
+      {/* Outstanding balance summary */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <button
+          type="button"
+          onClick={() => setBalanceFilter(balanceFilter === 'DUE' ? 'all' : 'DUE')}
+          className={`card-3d text-left bg-white border p-4 rounded-2xl shadow-sm flex items-center gap-3 transition-colors ${
+            balanceFilter === 'DUE' ? 'border-rose-300 ring-2 ring-rose-500/15' : 'border-slate-200/80 hover:border-rose-200'
+          }`}
+        >
+          <div className="p-2.5 rounded-xl bg-rose-50 text-rose-600">
+            <Wallet className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Total balance to collect</p>
+            <p className="text-lg font-bold font-mono text-rose-700">{formatCurrency(outstanding?.totalOutstanding ?? 0)}</p>
+            <p className="text-[11px] text-slate-500">
+              {outstanding?.invoiceCount ?? 0} bill{(outstanding?.invoiceCount ?? 0) === 1 ? '' : 's'} with balance ·{' '}
+              <span className="font-semibold text-rose-600">{balanceFilter === 'DUE' ? 'Show all' : 'Show only these'}</span>
+            </p>
+          </div>
+        </button>
+
+        <div className="card-3d bg-white border border-slate-200/80 p-2 rounded-2xl shadow-sm flex items-center gap-1.5">
+          {(
+            [
+              { key: 'all', label: 'All bills' },
+              { key: 'DUE', label: 'Balance due' },
+              { key: 'PAID', label: 'Fully paid' },
+            ] as { key: BalanceFilter; label: string }[]
+          ).map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              onClick={() => setBalanceFilter(opt.key)}
+              className={`flex-1 py-2.5 rounded-xl text-xs font-semibold transition-colors ${
+                balanceFilter === opt.key ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Filter and Date Range Bar */}
@@ -120,6 +183,8 @@ export default function InvoiceHistoryPage() {
                 <th className="py-3 px-4 font-semibold text-center uppercase tracking-wider text-[11px]">Payment</th>
                 <th className="py-3 px-4 font-semibold text-right uppercase tracking-wider text-[11px]">Items</th>
                 <th className="py-3 px-4 font-bold text-right uppercase tracking-wider text-[11px]">Amount</th>
+                <th className="py-3 px-4 font-semibold text-right uppercase tracking-wider text-[11px]">Paid</th>
+                <th className="py-3 px-4 font-bold text-right uppercase tracking-wider text-[11px]">Balance</th>
                 <th className="py-3 px-4 font-semibold text-center uppercase tracking-wider text-[11px]">Status</th>
                 <th className="py-3 px-4 font-semibold text-center uppercase tracking-wider text-[11px]">Actions</th>
               </tr>
@@ -127,13 +192,13 @@ export default function InvoiceHistoryPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400">
+                  <td colSpan={10} className="py-12 text-center text-slate-400">
                     Loading invoices...
                   </td>
                 </tr>
               ) : invoices.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400">
+                  <td colSpan={10} className="py-12 text-center text-slate-400">
                     No invoices found matching criteria.
                   </td>
                 </tr>
@@ -177,7 +242,19 @@ export default function InvoiceHistoryPage() {
                     <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 text-sm">
                       {formatCurrency(inv.finalTotal)}
                     </td>
+                    <td className="py-3 px-4 text-right font-mono text-emerald-700">
+                      {formatCurrency(inv.amountPaid)}
+                    </td>
+                    <td
+                      className={`py-3 px-4 text-right font-mono font-bold ${
+                        inv.balanceDue > 0 ? 'text-rose-600' : 'text-slate-400'
+                      }`}
+                    >
+                      {formatCurrency(inv.balanceDue)}
+                    </td>
                     <td className="py-3 px-4 text-center">
+                      <div className="flex flex-col items-center gap-1">
+                      <PaymentStatusBadge status={inv.paymentStatus} />
                       <span
                         className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
                           inv.status === 'COMPLETED'
@@ -189,9 +266,21 @@ export default function InvoiceHistoryPage() {
                       >
                         {inv.status}
                       </span>
+                      </div>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <div className="flex items-center justify-center gap-1.5">
+                        {inv.balanceDue > 0 && inv.status !== 'CANCELLED' && (
+                          <button
+                            type="button"
+                            onClick={() => setPayingInvoice(inv)}
+                            title="Record payment"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"
+                          >
+                            <IndianRupee className="w-3 h-3" />
+                            Collect
+                          </button>
+                        )}
                         <Link
                           href={`/invoices/${inv.id}`}
                           title="View & Print A4 Invoice"
@@ -216,6 +305,12 @@ export default function InvoiceHistoryPage() {
           </table>
         </div>
       </div>
+
+      <RecordPaymentModal
+        invoice={payingInvoice}
+        onClose={() => setPayingInvoice(null)}
+        onSaved={handlePaymentSaved}
+      />
     </div>
   );
 }

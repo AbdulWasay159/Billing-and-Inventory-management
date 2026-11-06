@@ -7,7 +7,17 @@ import {
 } from '@/lib/db/connection-router';
 import { prisma } from '@/lib/db/prisma';
 import { mapInvoice } from '@/lib/db/prisma-adapter';
+import type { InvoiceListFilter } from '@/lib/db/types';
 import { Invoice, InvoiceItem, PaymentMode } from '@/types';
+import { assertCustomerForBalance, resolveAmountPaid, round2 } from '@/lib/payments';
+
+const VALID_PAYMENT_MODES: PaymentMode[] = ['CASH', 'UPI'];
+
+export interface RecordPaymentInput {
+  amount: number;
+  paymentMode?: PaymentMode;
+  note?: string;
+}
 
 export interface CreateBillItemInput {
   productId: string;
@@ -19,6 +29,8 @@ export interface CreateInvoiceInput {
   customerPhone?: string;
   paymentMode: PaymentMode;
   discountAmount?: number;
+  /** Amount received now. Leave out to treat the bill as paid in full. */
+  amountPaid?: number;
   notes?: string;
   items: CreateBillItemInput[];
 }
@@ -128,6 +140,10 @@ export class BillingService {
         }
         const discountAmount = Math.round(rawDiscount * 100) / 100;
         const finalTotal = Math.round((subtotal - discountAmount) * 100) / 100;
+        const amountPaid = resolveAmountPaid(input.amountPaid, finalTotal);
+        const balanceDue = round2(finalTotal - amountPaid);
+        assertCustomerForBalance(balanceDue, input.customerName, input.customerPhone);
+        const billDate = new Date();
 
         // Atomic sequential invoice number
         const counter = await tx.sequenceCounter.upsert({
@@ -141,15 +157,31 @@ export class BillingService {
         const invoice = await tx.invoice.create({
           data: {
             invoiceNumber,
-            billDate: new Date(),
+            billDate,
             customerName: input.customerName?.trim() || undefined,
             customerPhone: input.customerPhone?.trim() || undefined,
             paymentMode: input.paymentMode,
             subtotal: Math.round(subtotal * 100) / 100,
             discountAmount,
             finalTotal,
+            amountPaid,
+            balanceDue,
             status: 'COMPLETED',
             notes: input.notes?.trim() || undefined,
+            payments:
+              amountPaid > 0
+                ? {
+                    create: [
+                      {
+                        type: 'PAYMENT',
+                        amount: amountPaid,
+                        paymentMode: input.paymentMode,
+                        note: 'Paid at billing',
+                        paidAt: billDate,
+                      },
+                    ],
+                  }
+                : undefined,
             items: {
               create: validatedItems.map((it) => ({
                 productId: it.productId,
@@ -167,6 +199,7 @@ export class BillingService {
           include: {
             items: true,
             returns: { include: { items: true } },
+            payments: { orderBy: { paidAt: 'asc' } },
           },
         });
 
@@ -242,6 +275,9 @@ export class BillingService {
     }
     const discountAmount = Math.round(rawDiscount * 100) / 100;
     const finalTotal = Math.round((subtotal - discountAmount) * 100) / 100;
+    const amountPaid = resolveAmountPaid(input.amountPaid, finalTotal);
+    const balanceDue = round2(finalTotal - amountPaid);
+    assertCustomerForBalance(balanceDue, input.customerName, input.customerPhone);
 
     const invoiceNumber = await this.invoiceRepo.generateNextInvoiceNumber();
 
@@ -255,6 +291,9 @@ export class BillingService {
         subtotal: Math.round(subtotal * 100) / 100,
         discountAmount,
         finalTotal,
+        amountPaid,
+        balanceDue,
+        paymentStatus: balanceDue <= 0 ? 'PAID' : amountPaid > 0 ? 'PARTIAL' : 'UNPAID',
         status: 'COMPLETED',
         notes: input.notes?.trim() || undefined,
       },
@@ -334,6 +373,7 @@ export class BillingService {
           include: {
             items: true,
             returns: { include: { items: true } },
+            payments: { orderBy: { paidAt: 'asc' } },
           },
         });
         if (!originalInvoice) throw new Error('Invoice not found.');
@@ -428,6 +468,21 @@ export class BillingService {
         const discountAmount = Math.round(rawDiscount * 100) / 100;
         const finalTotal = Math.round((subtotal - discountAmount) * 100) / 100;
 
+        // Keep what was already collected; if the new total is lower, the extra is refunded.
+        // A bill that was fully paid stays fully paid: any increase is collected with the edit.
+        const previouslyPaid = round2(Number(originalInvoice.amountPaid ?? originalInvoice.finalTotal));
+        const wasFullyPaid = round2(Number(originalInvoice.balanceDue ?? 0)) <= 0;
+        const refundOnEdit = round2(Math.max(0, previouslyPaid - finalTotal));
+        const extraPaidOnEdit = wasFullyPaid ? round2(Math.max(0, finalTotal - previouslyPaid)) : 0;
+        const amountPaid = round2(previouslyPaid - refundOnEdit + extraPaidOnEdit);
+        const balanceDue = round2(Math.max(0, finalTotal - amountPaid));
+        const effectivePaymentMode = input.paymentMode !== undefined ? input.paymentMode : originalInvoice.paymentMode;
+        assertCustomerForBalance(
+          balanceDue,
+          input.customerName !== undefined ? input.customerName : originalInvoice.customerName ?? undefined,
+          input.customerPhone !== undefined ? input.customerPhone : originalInvoice.customerPhone ?? undefined
+        );
+
         // Apply inventory corrections & transaction logs inside transaction
         for (const prodId of allProductIds) {
           const oldQty = oldQtyMap.get(prodId) || 0;
@@ -474,8 +529,30 @@ export class BillingService {
             subtotal: Math.round(subtotal * 100) / 100,
             discountAmount,
             finalTotal,
+            amountPaid,
+            balanceDue,
             status: 'EDITED',
             notes: input.notes !== undefined ? input.notes : originalInvoice.notes,
+            payments:
+              refundOnEdit > 0 || extraPaidOnEdit > 0
+                ? {
+                    create: [
+                      refundOnEdit > 0
+                        ? {
+                            type: 'REFUND',
+                            amount: -refundOnEdit,
+                            paymentMode: effectivePaymentMode,
+                            note: 'Refund after bill was edited',
+                          }
+                        : {
+                            type: 'PAYMENT',
+                            amount: extraPaidOnEdit,
+                            paymentMode: effectivePaymentMode,
+                            note: 'Extra amount paid after bill was edited',
+                          },
+                    ],
+                  }
+                : undefined,
             items: {
               create: updatedItems.map((it) => ({
                 productId: it.productId,
@@ -497,6 +574,7 @@ export class BillingService {
           include: {
             items: true,
             returns: { include: { items: true } },
+            payments: { orderBy: { paidAt: 'asc' } },
           },
         });
 
@@ -587,6 +665,21 @@ export class BillingService {
     const discountAmount = Math.round(rawDiscount * 100) / 100;
     const finalTotal = Math.round((subtotal - discountAmount) * 100) / 100;
 
+    // Keep what was already collected; if the new total is lower, the extra is refunded.
+    // A bill that was fully paid stays fully paid: any increase is collected with the edit.
+    const previouslyPaid = round2(originalInvoice.amountPaid);
+    const wasFullyPaid = round2(originalInvoice.balanceDue) <= 0;
+    const refundOnEdit = round2(Math.max(0, previouslyPaid - finalTotal));
+    const extraPaidOnEdit = wasFullyPaid ? round2(Math.max(0, finalTotal - previouslyPaid)) : 0;
+    const amountPaid = round2(previouslyPaid - refundOnEdit + extraPaidOnEdit);
+    const balanceDue = round2(Math.max(0, finalTotal - amountPaid));
+    const effectivePaymentMode = input.paymentMode !== undefined ? input.paymentMode : originalInvoice.paymentMode;
+    assertCustomerForBalance(
+      balanceDue,
+      input.customerName !== undefined ? input.customerName : originalInvoice.customerName,
+      input.customerPhone !== undefined ? input.customerPhone : originalInvoice.customerPhone
+    );
+
     // Apply inventory corrections
     for (const prodId of allProductIds) {
       const oldQty = oldQtyMap.get(prodId) || 0;
@@ -613,10 +706,108 @@ export class BillingService {
         subtotal: Math.round(subtotal * 100) / 100,
         discountAmount,
         finalTotal,
+        amountPaid,
+        balanceDue,
+        paymentStatus: balanceDue <= 0 ? 'PAID' : amountPaid > 0 ? 'PARTIAL' : 'UNPAID',
+        payments:
+          refundOnEdit > 0 || extraPaidOnEdit > 0
+            ? [
+                ...(originalInvoice.payments ?? []),
+                {
+                  id: 'pay_' + Math.random().toString(36).substring(2, 9),
+                  invoiceId: originalInvoice.id,
+                  type: refundOnEdit > 0 ? 'REFUND' : 'PAYMENT',
+                  amount: refundOnEdit > 0 ? -refundOnEdit : extraPaidOnEdit,
+                  paymentMode: effectivePaymentMode,
+                  note: refundOnEdit > 0 ? 'Refund after bill was edited' : 'Extra amount paid after bill was edited',
+                  paidAt: new Date().toISOString(),
+                },
+              ]
+            : originalInvoice.payments,
         notes: input.notes !== undefined ? input.notes : originalInvoice.notes,
       },
       updatedItems
     );
+  }
+
+  /** Collect part or all of the remaining balance on a bill. */
+  async recordPayment(invoiceId: string, input: RecordPaymentInput): Promise<Invoice> {
+    const amount = round2(Number(input.amount));
+    if (isNaN(amount) || !isFinite(amount) || amount <= 0) {
+      throw new Error('Payment amount must be greater than zero.');
+    }
+    if (input.paymentMode !== undefined && !VALID_PAYMENT_MODES.includes(input.paymentMode)) {
+      throw new Error('Payment mode must be CASH or UPI.');
+    }
+    const note = input.note?.toString().trim().slice(0, 200) || undefined;
+
+    if (isPrismaConfigured()) {
+      return prisma.$transaction(async (tx) => {
+        const invoice = await tx.invoice.findUnique({ where: { id: invoiceId } });
+        if (!invoice) throw new Error('Invoice not found.');
+        if (invoice.status === 'CANCELLED') throw new Error('Cannot take a payment on a cancelled invoice.');
+        const balance = round2(Number(invoice.balanceDue));
+        if (balance <= 0) throw new Error('This invoice is already fully paid.');
+        if (amount > balance) {
+          throw new Error(`Payment (₹${amount.toFixed(2)}) is more than the balance due (₹${balance.toFixed(2)}).`);
+        }
+
+        // Guarded update: fails if another payment changed the balance meanwhile.
+        const res = await tx.invoice.updateMany({
+          where: { id: invoiceId, balanceDue: invoice.balanceDue },
+          data: {
+            amountPaid: round2(Number(invoice.amountPaid) + amount),
+            balanceDue: round2(balance - amount),
+          },
+        });
+        if (res.count === 0) throw new Error('The balance changed while saving. Please refresh and try again.');
+
+        await tx.invoicePayment.create({
+          data: {
+            invoiceId,
+            type: 'PAYMENT',
+            amount,
+            paymentMode: input.paymentMode ?? invoice.paymentMode,
+            note,
+          },
+        });
+
+        const updated = await tx.invoice.findUnique({
+          where: { id: invoiceId },
+          include: {
+            items: true,
+            returns: { include: { items: true } },
+            payments: { orderBy: { paidAt: 'asc' } },
+          },
+        });
+        return mapInvoice(updated!);
+      });
+    }
+
+    const invoice = await this.invoiceRepo.findById(invoiceId);
+    if (!invoice) throw new Error('Invoice not found.');
+    if (invoice.status === 'CANCELLED') throw new Error('Cannot take a payment on a cancelled invoice.');
+    if (invoice.balanceDue <= 0) throw new Error('This invoice is already fully paid.');
+    if (amount > invoice.balanceDue) {
+      throw new Error(
+        `Payment (₹${amount.toFixed(2)}) is more than the balance due (₹${invoice.balanceDue.toFixed(2)}).`
+      );
+    }
+    return this.invoiceRepo.applyPaymentChange(
+      invoiceId,
+      { amountPaid: round2(invoice.amountPaid + amount), balanceDue: round2(invoice.balanceDue - amount) },
+      {
+        type: 'PAYMENT',
+        amount,
+        paymentMode: input.paymentMode ?? invoice.paymentMode,
+        note,
+        paidAt: new Date().toISOString(),
+      }
+    );
+  }
+
+  async getOutstandingSummary() {
+    return this.invoiceRepo.getOutstandingSummary();
   }
 
   async getInvoiceById(id: string): Promise<Invoice | null> {
@@ -625,13 +816,7 @@ export class BillingService {
     return this.invoiceRepo.findByInvoiceNumber(id);
   }
 
-  async getInvoices(params?: {
-    startDate?: string;
-    endDate?: string;
-    customerSearch?: string;
-    limit?: number;
-    offset?: number;
-  }) {
+  async getInvoices(params?: InvoiceListFilter) {
     return this.invoiceRepo.findMany(params);
   }
 }
