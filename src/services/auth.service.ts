@@ -67,7 +67,7 @@ export class AuthService {
           role: localUser.role,
           isActive: localUser.isActive,
         };
-      } else if (cleanEmail === 'owner@tradestock.com') {
+      } else if (cleanEmail === 'owner@tradestock.com' && (localDb.getData().users || []).length === 0) {
         const defaultHash = bcrypt.hashSync('password123', 10);
         user = {
           id: 'user_owner_001',
@@ -199,6 +199,59 @@ export class AuthService {
         role: updated.role,
       };
     }
+  }
+
+  async changeEmail(
+    session: { shopId: string; shopName: string; email: string; role: 'OWNER' },
+    newEmailRaw: string,
+    currentPassword: string
+  ): Promise<{ email: string; token: string }> {
+    const currentEmail = session.email.trim().toLowerCase();
+    const newEmail = (newEmailRaw || '').trim().toLowerCase();
+
+    if (!newEmail || !currentPassword) {
+      throw new Error('New email and current password are required.');
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(newEmail)) {
+      throw new Error('Please enter a valid email address.');
+    }
+    if (newEmail === currentEmail) {
+      throw new Error('That is already your login email.');
+    }
+
+    let user: { passwordHash: string } | null = null;
+    let taken = false;
+    if (isPrismaConfigured()) {
+      user = await prisma.user.findUnique({ where: { email: currentEmail } });
+      taken = Boolean(await prisma.user.findUnique({ where: { email: newEmail } }));
+    } else {
+      const { LocalDatabaseManager } = await import('@/lib/db/local-adapter');
+      const localDb = LocalDatabaseManager.getInstance();
+      user = localDb.getUserByEmail(currentEmail);
+      taken = Boolean(localDb.getUserByEmail(newEmail));
+    }
+
+    if (!user) throw new Error('User account not found.');
+    if (!(await bcrypt.compare(currentPassword, user.passwordHash))) {
+      throw new Error('Current password is incorrect.');
+    }
+    if (taken) throw new Error('Another account already uses that email.');
+
+    if (isPrismaConfigured()) {
+      await prisma.user.update({ where: { email: currentEmail }, data: { email: newEmail } });
+    } else {
+      const { LocalDatabaseManager } = await import('@/lib/db/local-adapter');
+      LocalDatabaseManager.getInstance().updateUser(currentEmail, { email: newEmail });
+    }
+
+    // Re-issue the session so the signed-in user stays signed in under the new email.
+    const token = await createSessionToken({
+      shopId: session.shopId,
+      shopName: session.shopName,
+      email: newEmail,
+      role: 'OWNER',
+    });
+    return { email: newEmail, token };
   }
 
   async changePassword(

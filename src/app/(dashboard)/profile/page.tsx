@@ -45,6 +45,14 @@ export default function ProfilePage() {
   const [passwordSuccess, setPasswordSuccess] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
 
+  // Login email change state
+  const [editingEmail, setEditingEmail] = useState(false);
+  const [newEmail, setNewEmail] = useState('');
+  const [emailPassword, setEmailPassword] = useState('');
+  const [changingEmail, setChangingEmail] = useState(false);
+  const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+
   const fetchProfile = async () => {
     setLoading(true);
     setProfileError(null);
@@ -133,6 +141,36 @@ export default function ProfilePage() {
       setPasswordError(err.message);
     } finally {
       setChangingPassword(false);
+    }
+  };
+
+  const handleChangeEmail = async () => {
+    setEmailError(null);
+    setEmailSuccess(null);
+    if (!newEmail.trim() || !emailPassword) {
+      setEmailError('Enter the new email and your current password.');
+      return;
+    }
+    setChangingEmail(true);
+    try {
+      const res = await fetch('/api/auth/email', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newEmail, currentPassword: emailPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to change email');
+      }
+      setProfile((p) => (p ? { ...p, email: data.email } : p));
+      setEmailSuccess(`Login email changed to ${data.email}. Use it next time you sign in.`);
+      setEditingEmail(false);
+      setNewEmail('');
+      setEmailPassword('');
+    } catch (err: any) {
+      setEmailError(err.message);
+    } finally {
+      setChangingEmail(false);
     }
   };
 
@@ -248,9 +286,71 @@ export default function ProfilePage() {
                 />
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
               </div>
-              <p className="text-[11px] text-slate-400 mt-1">
-                Login email is managed via administrative security policy.
-              </p>
+              {emailSuccess && (
+                <p className="text-[11px] text-emerald-700 mt-1 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> {emailSuccess}
+                </p>
+              )}
+              {!editingEmail ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingEmail(true);
+                    setEmailError(null);
+                    setEmailSuccess(null);
+                  }}
+                  className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 mt-1.5"
+                >
+                  Change login email
+                </button>
+              ) : (
+                <div className="mt-3 p-3.5 rounded-xl border border-blue-100 bg-blue-50/40 space-y-2.5">
+                  {emailError && (
+                    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>{emailError}</span>
+                    </div>
+                  )}
+                  <input
+                    type="email"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder="New login email"
+                    autoComplete="email"
+                    className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 text-slate-900"
+                  />
+                  <input
+                    type="password"
+                    value={emailPassword}
+                    onChange={(e) => setEmailPassword(e.target.value)}
+                    placeholder="Current password"
+                    autoComplete="current-password"
+                    className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 text-slate-900"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleChangeEmail}
+                      disabled={changingEmail}
+                      className="flex-1 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50"
+                    >
+                      {changingEmail ? 'Updating...' : 'Update Email'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingEmail(false);
+                        setNewEmail('');
+                        setEmailPassword('');
+                        setEmailError(null);
+                      }}
+                      className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs font-semibold hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
