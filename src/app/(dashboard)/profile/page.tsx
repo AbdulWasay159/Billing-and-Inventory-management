@@ -58,6 +58,10 @@ export default function ProfilePage() {
     setProfileError(null);
     try {
       const res = await fetch('/api/auth/profile');
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
       if (!res.ok) {
         throw new Error('Failed to load profile');
       }

@@ -10,7 +10,14 @@ export async function GET(request: Request) {
   try {
     const profile = await authService.getUserProfile(auth.session.email);
     if (!profile) {
-      return NextResponse.json({ error: 'User profile not found' }, { status: 404 });
+      // Session points at an account that no longer exists under that email
+      // (e.g. the login email was changed on another device): force a fresh sign-in.
+      const res = NextResponse.json(
+        { error: 'Your session is out of date. Please sign in again.', reauth: true },
+        { status: 401 }
+      );
+      res.cookies.delete('tradestock_session');
+      return res;
     }
     return NextResponse.json(profile);
   } catch (err: any) {
