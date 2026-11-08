@@ -5,10 +5,12 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "vercel-build": "node scripts/vercel-build.mjs",
     "start": "next start",
     "lint": "eslint",
     "test": "npx tsx scripts/test-suite.ts",
-    "db:reset": "tsx scripts/reset-data.ts"
+    "db:reset": "tsx scripts/reset-data.ts",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@google-cloud/storage": "^8.2.0",
