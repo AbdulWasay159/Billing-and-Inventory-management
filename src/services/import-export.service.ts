@@ -1,6 +1,7 @@
 // src/services/import-export.service.ts
 import { getProductRepository, getStockRepository, isPrismaConfigured } from '@/lib/db/connection-router';
 import { prisma } from '@/lib/db/prisma';
+import type { Prisma } from '@prisma/client';
 import { ImportPreviewRow, ImportSummary } from '@/types';
 import { parseAndValidateImportBuffer, ParseResult } from '@/lib/excel/importer';
 import { exportProductsToWorkbook, exportProductsToCsvString } from '@/lib/excel/exporter';
@@ -72,106 +73,106 @@ export class ImportExportService {
     this.validateRowsBeforeCommit(validatedRows);
 
     if (isPrismaConfigured()) {
+      // Bulk strategy: a handful of round trips regardless of row count, so large
+      // imports stay well inside serverless time limits even over a high-latency
+      // database connection.
+      const errorCount = validatedRows.filter((r) => r.errors.length > 0).length;
+      const byId = new Map<string, ImportPreviewRow>();
+      for (const row of validatedRows) {
+        if (row.errors.length > 0) continue;
+        byId.set(row.productId.trim().toUpperCase(), row); // last occurrence wins
+      }
+      const ids = Array.from(byId.keys());
+
       return prisma.$transaction(
         async (tx) => {
-          let newCount = 0;
+          const existingProducts = ids.length
+            ? await tx.product.findMany({ where: { productId: { in: ids } } })
+            : [];
+          const existingById = new Map(existingProducts.map((p) => [p.productId, p]));
+
+          const productData = (row: ImportPreviewRow) => ({
+            name: row.name,
+            size: row.size,
+            companyBrand: row.companyBrand,
+            unit: row.unit,
+            stockQuantity: row.targetStock,
+            lowStockLimit: row.lowStockLimit,
+            mrp: row.mrp,
+            purchaseDiscountPercent: row.purchaseDiscountPercent,
+            purchasePrice: row.purchasePrice,
+            profitMarginPercent: row.profitMarginPercent,
+            sellingPrice: row.sellingPrice,
+          });
+
+          const stockTxns: Prisma.StockTransactionCreateManyInput[] = [];
           let updatedCount = 0;
-          let errorCount = 0;
 
-          for (const row of validatedRows) {
-            if (row.errors.length > 0) {
-              errorCount++;
-              continue;
+          // Updates (one statement per changed product)
+          for (const [cleanId, row] of byId) {
+            const existing = existingById.get(cleanId);
+            if (!existing) continue;
+            const currentStock = Number(existing.stockQuantity);
+            const stockDelta = Math.round((row.targetStock - currentStock) * 1000) / 1000;
+            await tx.product.update({ where: { id: existing.id }, data: productData(row) });
+            if (stockDelta !== 0) {
+              stockTxns.push({
+                productId: existing.id,
+                transactionType: 'IMPORT_SET',
+                quantityChange: stockDelta,
+                stockBefore: currentStock,
+                stockAfter: row.targetStock,
+                referenceType: 'IMPORT',
+                notes: `Excel Import set stock from ${currentStock} to ${row.targetStock} (Delta: ${stockDelta > 0 ? '+' : ''}${stockDelta})`,
+              });
             }
+            updatedCount++;
+          }
 
-            const cleanId = row.productId.trim().toUpperCase();
-            const existing = await tx.product.findUnique({
-              where: { productId: cleanId },
+          // New products in one insert
+          const newIds = ids.filter((id) => !existingById.has(id));
+          if (newIds.length > 0) {
+            await tx.product.createMany({
+              data: newIds.map((cleanId) => ({
+                productId: cleanId,
+                ...productData(byId.get(cleanId)!),
+                previousSellingPrice: null,
+                isActive: true,
+              })),
             });
-
-            if (existing) {
-              const currentStock = Number(existing.stockQuantity);
-              const stockDelta = Math.round((row.targetStock - currentStock) * 1000) / 1000;
-
-              await tx.product.update({
-                where: { id: existing.id },
-                data: {
-                  name: row.name,
-                  size: row.size,
-                  companyBrand: row.companyBrand,
-                  unit: row.unit,
-                  stockQuantity: row.targetStock,
-                  lowStockLimit: row.lowStockLimit,
-                  mrp: row.mrp,
-                  purchaseDiscountPercent: row.purchaseDiscountPercent,
-                  purchasePrice: row.purchasePrice,
-                  profitMarginPercent: row.profitMarginPercent,
-                  sellingPrice: row.sellingPrice,
-                },
-              });
-
-              if (stockDelta !== 0) {
-                await tx.stockTransaction.create({
-                  data: {
-                    productId: existing.id,
-                    transactionType: 'IMPORT_SET',
-                    quantityChange: stockDelta,
-                    stockBefore: currentStock,
-                    stockAfter: row.targetStock,
-                    referenceType: 'IMPORT',
-                    notes: `Excel Import set stock from ${currentStock} to ${row.targetStock} (Delta: ${stockDelta > 0 ? '+' : ''}${stockDelta})`,
-                  },
-                });
-              }
-
-              updatedCount++;
-            } else {
-              const created = await tx.product.create({
-                data: {
-                  productId: cleanId,
-                  name: row.name,
-                  size: row.size,
-                  companyBrand: row.companyBrand,
-                  unit: row.unit,
-                  stockQuantity: row.targetStock,
-                  lowStockLimit: row.lowStockLimit,
-                  mrp: row.mrp,
-                  purchaseDiscountPercent: row.purchaseDiscountPercent,
-                  purchasePrice: row.purchasePrice,
-                  profitMarginPercent: row.profitMarginPercent,
-                  sellingPrice: row.sellingPrice,
-                  previousSellingPrice: null,
-                  isActive: true,
-                },
-              });
-
+            const created = await tx.product.findMany({
+              where: { productId: { in: newIds } },
+              select: { id: true, productId: true },
+            });
+            for (const c of created) {
+              const row = byId.get(c.productId)!;
               if (row.targetStock > 0) {
-                await tx.stockTransaction.create({
-                  data: {
-                    productId: created.id,
-                    transactionType: 'IMPORT_SET',
-                    quantityChange: row.targetStock,
-                    stockBefore: 0,
-                    stockAfter: row.targetStock,
-                    referenceType: 'IMPORT',
-                    notes: `Excel Import created new product with initial stock ${row.targetStock}`,
-                  },
+                stockTxns.push({
+                  productId: c.id,
+                  transactionType: 'IMPORT_SET',
+                  quantityChange: row.targetStock,
+                  stockBefore: 0,
+                  stockAfter: row.targetStock,
+                  referenceType: 'IMPORT',
+                  notes: `Excel Import created new product with initial stock ${row.targetStock}`,
                 });
               }
-
-              newCount++;
             }
+          }
+
+          if (stockTxns.length > 0) {
+            await tx.stockTransaction.createMany({ data: stockTxns });
           }
 
           return {
             totalRows: validatedRows.length,
-            newProductsCount: newCount,
+            newProductsCount: newIds.length,
             updatedProductsCount: updatedCount,
             errorCount,
             importedAt: new Date().toISOString(),
           };
         },
-        { timeout: 60000 }
+        { timeout: 120000, maxWait: 20000 }
       );
     }
 
