@@ -5,7 +5,7 @@ import {
   getStockRepository,
   isPrismaConfigured,
 } from '@/lib/db/connection-router';
-import { prisma } from '@/lib/db/prisma';
+import { prisma, TX_OPTIONS } from '@/lib/db/prisma';
 import { mapInvoiceReturn } from '@/lib/db/prisma-adapter';
 import { InvoiceReturn } from '@/types';
 import { netInvoiceTotal, round2 } from '@/lib/payments';
@@ -214,7 +214,7 @@ export class ReturnService {
           cashRefundAmount: settled.cashRefund,
           balanceAdjustedAmount: round2(Math.max(0, previousBalance - settled.balanceDue)),
         };
-      });
+      }, TX_OPTIONS);
     }
 
     const invoice = await this.invoiceRepo.findById(input.invoiceId);

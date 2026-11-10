@@ -41,4 +41,12 @@ if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma;
 }
 
+/**
+ * Interactive transaction limits. Prisma's defaults (maxWait 2s, timeout 5s) are
+ * too tight for a serverless function talking to a remote pooled database: a bill
+ * with several lines exceeded 5s and Prisma closed the transaction mid-way
+ * ("Transaction not found"). Give it headroom.
+ */
+export const TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 } as const;
+
 export default prisma;

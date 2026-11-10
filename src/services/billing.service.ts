@@ -5,7 +5,7 @@ import {
   getStockRepository,
   isPrismaConfigured,
 } from '@/lib/db/connection-router';
-import { prisma } from '@/lib/db/prisma';
+import { prisma, TX_OPTIONS } from '@/lib/db/prisma';
 import { mapInvoice } from '@/lib/db/prisma-adapter';
 import type { InvoiceListFilter } from '@/lib/db/types';
 import { Invoice, InvoiceItem, PaymentMode } from '@/types';
@@ -68,24 +68,38 @@ export class BillingService {
         }[] = [];
         let subtotal = 0;
 
+        // Fetch every billed product in ONE round trip instead of 1-2 queries per line.
+        const lookupKeys = input.items.map((it) => String(it.productId ?? '').trim());
+        const fetchedProducts = await tx.product.findMany({
+          where: {
+            OR: [
+              { id: { in: lookupKeys } },
+              { productId: { in: lookupKeys.map((k) => k.toUpperCase()) } },
+            ],
+          },
+        });
+        const byKey = new Map<string, (typeof fetchedProducts)[number]>();
+        for (const p of fetchedProducts) {
+          byKey.set(p.id, p);
+          byKey.set(p.productId.toUpperCase(), p);
+        }
+        // Running stock per product so the same product on two lines stays correct.
+        const runningStock = new Map<string, number>();
+
         for (const itemInput of input.items) {
           if (itemInput.quantity <= 0 || !isFinite(itemInput.quantity)) {
             throw new Error('Quantity must be a positive finite number for all items.');
           }
 
-          let product = await tx.product.findUnique({
-            where: { id: itemInput.productId },
-          });
-          if (!product) {
-            product = await tx.product.findUnique({
-              where: { productId: itemInput.productId.trim().toUpperCase() },
-            });
-          }
+          const key = String(itemInput.productId ?? '').trim();
+          const product = byKey.get(key) ?? byKey.get(key.toUpperCase());
           if (!product) {
             throw new Error(`Product not found.`);
           }
 
-          const stockBefore = Number(product.stockQuantity);
+          const stockBefore = runningStock.has(product.id)
+            ? (runningStock.get(product.id) as number)
+            : Number(product.stockQuantity);
           if (stockBefore < itemInput.quantity) {
             throw new Error(
               `Insufficient stock for "${product.name}" (${product.productId}). Available: ${stockBefore}, Requested: ${itemInput.quantity}`
@@ -113,6 +127,7 @@ export class BillingService {
           }
 
           const stockAfter = Math.round((stockBefore - itemInput.quantity) * 1000) / 1000;
+          runningStock.set(product.id, stockAfter);
 
           validatedItems.push({
             productId: product.id,
@@ -203,24 +218,22 @@ export class BillingService {
           },
         });
 
-        // Record stock transactions
-        for (const item of validatedItems) {
-          await tx.stockTransaction.create({
-            data: {
-              productId: item.productId,
-              transactionType: 'SALE',
-              quantityChange: -item.quantity,
-              stockBefore: item.stockBefore,
-              stockAfter: item.stockAfter,
-              referenceId: invoice.id,
-              referenceType: 'INVOICE',
-              notes: `Invoice ${invoice.invoiceNumber}`,
-            },
-          });
-        }
+        // Record all stock transactions in a single insert
+        await tx.stockTransaction.createMany({
+          data: validatedItems.map((item) => ({
+            productId: item.productId,
+            transactionType: 'SALE',
+            quantityChange: -item.quantity,
+            stockBefore: item.stockBefore,
+            stockAfter: item.stockAfter,
+            referenceId: invoice.id,
+            referenceType: 'INVOICE',
+            notes: `Invoice ${invoice.invoiceNumber}`,
+          })),
+        });
 
         return mapInvoice(invoice);
-      });
+      }, TX_OPTIONS);
     }
 
     // ==============================================================
@@ -579,7 +592,7 @@ export class BillingService {
         });
 
         return mapInvoice(updated!);
-      });
+      }, TX_OPTIONS);
     }
 
     const originalInvoice = await this.invoiceRepo.findById(invoiceId);
@@ -781,7 +794,7 @@ export class BillingService {
           },
         });
         return mapInvoice(updated!);
-      });
+      }, TX_OPTIONS);
     }
 
     const invoice = await this.invoiceRepo.findById(invoiceId);

@@ -12,9 +12,11 @@ export async function GET(request: Request) {
     const startDate = searchParams.get('startDate') || undefined;
     const endDate = searchParams.get('endDate') || undefined;
 
-    const stats = await analyticsService.getDashboardMetrics(startDate, endDate);
-    const lowStock = await analyticsService.getLowStockProducts();
-    const outOfStock = await analyticsService.getOutOfStockProducts();
+    const [stats, lowStock, outOfStock] = await Promise.all([
+      analyticsService.getDashboardMetrics(startDate, endDate),
+      analyticsService.getLowStockProducts(),
+      analyticsService.getOutOfStockProducts(),
+    ]);
 
     return NextResponse.json({
       stats,

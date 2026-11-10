@@ -495,6 +495,11 @@ export class LocalProductRepository implements IProductRepository {
       }
     }
 
+    // Stable order by permanent Product ID so edits never reshuffle the list
+    prods = [...prods].sort(
+      (a, b) => a.productId.localeCompare(b.productId) || a.createdAt.localeCompare(b.createdAt)
+    );
+
     const totalCount = prods.length;
     if (filter?.offset !== undefined || filter?.limit !== undefined) {
       const offset = filter.offset || 0;
