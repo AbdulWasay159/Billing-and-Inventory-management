@@ -1,5 +1,12 @@
 // src/lib/db/prisma-adapter.ts
-import { prisma } from './prisma';
+import { prisma, TX_OPTIONS } from './prisma';
+
+/**
+ * Stable product list order. Previously lists sorted by updatedAt, so editing a
+ * product (or billing it, which changes stock) jumped it to the top. Sort by the
+ * permanent Product ID instead (HW-0001, HW-0002, ...), with createdAt as a tiebreaker.
+ */
+const PRODUCT_LIST_ORDER = [{ productId: 'asc' as const }, { createdAt: 'asc' as const }];
 import {
   Product,
   PriceHistory,
@@ -270,7 +277,7 @@ export class PrismaProductRepository implements IProductRepository {
       const candidates = await prisma.product.findMany({
         where,
         select: { id: true, stockQuantity: true, lowStockLimit: true },
-        orderBy: { updatedAt: 'desc' },
+        orderBy: PRODUCT_LIST_ORDER,
       });
 
       const matchedIds = candidates
@@ -295,7 +302,7 @@ export class PrismaProductRepository implements IProductRepository {
 
       const products = await prisma.product.findMany({
         where: { id: { in: pageIds } },
-        orderBy: { updatedAt: 'desc' },
+        orderBy: PRODUCT_LIST_ORDER,
         include: {
           customFieldValues: {
             include: { fieldDefinition: true },
@@ -312,7 +319,7 @@ export class PrismaProductRepository implements IProductRepository {
         where,
         take: filter?.limit ?? 50,
         skip: filter?.offset ?? 0,
-        orderBy: { updatedAt: 'desc' },
+        orderBy: PRODUCT_LIST_ORDER,
         include: {
           customFieldValues: {
             include: { fieldDefinition: true },
@@ -601,7 +608,7 @@ export class PrismaStockRepository implements IStockRepository {
         newStock: stockAfter,
         transaction: mapStockTransaction(transaction),
       };
-    });
+    }, TX_OPTIONS);
   }
 }
 
@@ -840,7 +847,7 @@ export class PrismaInvoiceRepository implements IInvoiceRepository {
       });
 
       return mapInvoice(updated);
-    });
+    }, TX_OPTIONS);
   }
 
   async getMonthlySummary(year: number, month: number): Promise<MonthlyBillingSummary> {
